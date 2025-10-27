@@ -5,7 +5,7 @@ Módulo de reporte para UCMDB con soporte para respuestas grandes.
 import os
 import logging
 import time
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 
 import requests
 import urllib3
@@ -254,49 +254,44 @@ def extraer_datos_relevantes_servicecodes(
 
 def validar_nit_en_relaciones_invertidas(
     json_data: Dict[str, Any]
-) -> List[str]:
+) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
     """
     Valida la consistencia de NITs entre nodos relacionados.
 
-    Compara los NITs de los nodos end1 (clr_onyxdb_company_nit) y end2 
-    (clr_onyxdb_companynit) de cada relación. Identifica inconsistencias 
-    cuando los NITs no coinciden.
+    Separa en inconsistencias normales aquellas donde los NITs numéricos no coinciden,
+    y en inconsistencias particulares cuando el NIT del servicecode es texto (no numérico).
 
     Args:
-        json_data (Dict[str, Any]): Diccionario con 'cis' y 'relations' 
-                                    del reporte UCMDB.
+        json_data (Dict[str, Any]): Diccionario con 'cis' y 'relations' del reporte UCMDB.
 
     Returns:
-        List[str]: Lista de ucmdbId de relaciones con NITs inconsistentes.
+        Tuple[List[Dict[str, str]], List[Dict[str, str]]]: Dos listas con diccionarios que contienen ucmdbId
+        y NITs para inconsistencias normales y particulares respectivamente.
+        Cada diccionario tiene llaves: "ucmdbId", "nit_end1", "nit_end2".
     """
     if not isinstance(json_data, dict):
         logger.error("json_data debe ser un diccionario")
-        return []
-    
+        return [], []
+
     cis = json_data.get("cis", [])
     relaciones = json_data.get("relations", [])
-    
+
     if not cis or not relaciones:
         logger.warning("No hay CIs o relaciones para procesar")
-        return []
+        return [], []
 
-    # Indexar nodos por ucmdbId para búsqueda O(1)
-    logger.info(f"Indexando {len(cis)} nodos CIS...")
     nodos_por_id: Dict[str, Dict[str, Any]] = {
-        obj.get("ucmdbId"): obj 
-        for obj in cis 
+        obj.get("ucmdbId"): obj
+        for obj in cis
         if obj.get("ucmdbId")
     }
-    
-    logger.info(f"Índice creado con {len(nodos_por_id)} nodos")
-    logger.info(f"Procesando {len(relaciones)} relaciones...")
 
-    inconsistencias: List[str] = []
+    inconsistencias_normales: List[Dict[str, str]] = []
+    inconsistencias_particulares: List[Dict[str, str]] = []
     nodos_faltantes = 0
     nits_faltantes = 0
     procesadas = 0
 
-    # Para reportes grandes, mostrar progreso cada 10%
     progreso_cada = max(len(relaciones) // 10, 1)
 
     for idx, rel in enumerate(relaciones, 1):
@@ -305,9 +300,10 @@ def validar_nit_en_relaciones_invertidas(
             logger.info(
                 f"Progreso: {idx}/{len(relaciones)} relaciones "
                 f"({porcentaje:.1f}%) - "
-                f"Inconsistencias encontradas: {len(inconsistencias)}"
+                f"Inconsistencias normales: {len(inconsistencias_normales)} - "
+                f"Inconsistencias particulares: {len(inconsistencias_particulares)}"
             )
-        
+
         rel_id = rel.get("ucmdbId")
         end1_id = rel.get("end1Id")
         end2_id = rel.get("end2Id")
@@ -315,7 +311,6 @@ def validar_nit_en_relaciones_invertidas(
         nodo_end1 = nodos_por_id.get(end1_id)
         nodo_end2 = nodos_por_id.get(end2_id)
 
-        # Validar existencia de ambos nodos
         if not nodo_end1 or not nodo_end2:
             nodos_faltantes += 1
             logger.debug(
@@ -324,33 +319,42 @@ def validar_nit_en_relaciones_invertidas(
             )
             continue
 
-        # Obtener NITs con manejo seguro de propiedades
         nit_end1 = nodo_end1.get("properties", {}).get(NIT_FIELD_END1)
         nit_end2 = nodo_end2.get("properties", {}).get(NIT_FIELD_END2)
 
-        # Validar existencia de ambos NITs
         if nit_end1 is None or nit_end2 is None:
             nits_faltantes += 1
             logger.debug(f"Relación {rel_id}: NITs faltantes")
             continue
 
-        # Comparar NITs (normalizados con strip)
-        if nit_end1.strip() != nit_end2.strip():
-            inconsistencias.append(rel_id)
-            logger.debug(
-                f"Inconsistencia en {rel_id}: "
-                f"NIT1='{nit_end1}' vs NIT2='{nit_end2}'"
-            )
-        
+        nit_end1_norm = nit_end1.strip()
+        nit_end2_norm = nit_end2.strip()
+
+        if nit_end1_norm != nit_end2_norm:
+            # Detectar inconsistencia particular
+            if any(c.isalpha() for c in nit_end2_norm):
+                inconsistencias_particulares.append({
+                    "ucmdbId": rel_id,
+                    "nit_end1": nit_end1_norm,
+                    "nit_end2": nit_end2_norm,
+                })
+            else:
+                inconsistencias_normales.append({
+                    "ucmdbId": rel_id,
+                    "nit_end1": nit_end1_norm,
+                    "nit_end2": nit_end2_norm,
+                })
+
         procesadas += 1
 
-    # Resumen de validación
     logger.info("=" * 60)
     logger.info("Resumen de validación de NITs:")
     logger.info(f"  Total de relaciones procesadas: {procesadas}")
-    logger.info(f"  Inconsistencias encontradas: {len(inconsistencias)}")
+    logger.info(f"  Inconsistencias normales encontradas: {len(inconsistencias_normales)}")
+    logger.info(f"  Inconsistencias particulares encontradas: {len(inconsistencias_particulares)}")
     logger.info(f"  Nodos faltantes: {nodos_faltantes}")
     logger.info(f"  NITs faltantes: {nits_faltantes}")
     logger.info("=" * 60)
-    
-    return inconsistencias
+
+    return inconsistencias_normales, inconsistencias_particulares
+
