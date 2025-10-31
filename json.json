@@ -1,0 +1,67 @@
+{
+    "cis": [
+        {
+            "ucmdbId": "4f72faf9e3a5d4bca1218054cb5ee1e6",
+            "globalId": null,
+            "type": "clr_onyxcrm",
+            "properties": {
+                "display_label": "ITALCOL DE OCCIDENTE S.A._891304762-2_11957052",
+                "clr_onyxdb_company_nit": "891304762-2"
+            },
+            "attributesQualifiers": null,
+            "displayLabel": null,
+            "label": "ONYX Company_1"
+        },
+        {
+            "ucmdbId": "4112686c0f7ad46e8759ad459cb2c77c",
+            "globalId": null,
+            "type": "clr_service_catalog_fo_e",
+            "properties": {
+                "display_label": "Empresas – Internet Empresarial"
+            },
+            "attributesQualifiers": null,
+            "displayLabel": null,
+            "label": "ServiceCatalog (FO)"
+        },
+        {
+            "ucmdbId": "48b12e3e812d4210bd344a8d3e2e9293",
+            "globalId": null,
+            "type": "clr_onyxservicecodes",
+            "properties": {
+                "display_label": "CONAS00004",
+                "clr_onyxdb_companynit": "891304762-2"
+            },
+            "attributesQualifiers": null,
+            "displayLabel": null,
+            "label": "OnyxServiceCode"
+        }
+    ],
+    "relations": [
+        {
+            "ucmdbId": "4a151943bb2ff998ad3f0f3704d23c17",
+            "globalId": null,
+            "type": "ownership",
+            "properties": {
+                "display_label": "Ownership"
+            },
+            "attributesQualifiers": null,
+            "displayLabel": null,
+            "end1Id": "4f72faf9e3a5d4bca1218054cb5ee1e6",
+            "end2Id": "48b12e3e812d4210bd344a8d3e2e9293",
+            "label": "Ownership"
+        },
+        {
+            "ucmdbId": "4de5be800a416be2a3a5b64f35d2c3ef",
+            "globalId": null,
+            "type": "containment",
+            "properties": {
+                "display_label": "Containment"
+            },
+            "attributesQualifiers": null,
+            "displayLabel": null,
+            "end1Id": "4112686c0f7ad46e8759ad459cb2c77c",
+            "end2Id": "48b12e3e812d4210bd344a8d3e2e9293",
+            "label": "Containment"
+        }
+    ]
+}
