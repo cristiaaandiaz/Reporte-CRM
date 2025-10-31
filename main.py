@@ -111,9 +111,9 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path) -> int:
         for item in inconsistencias_particulares:
             logger.warning(f"  - Relación ucmdbId: {item['ucmdbId']}")
             logger.warning(f"      NIT end1: {item['nit_end1']} vs NIT end2 (texto): {item['nit_end2']}")
-
-    #guardar_inconsistencias_detalle(inconsistencias_normales, carpeta, "inconsistencias.txt")
-    #guardar_inconsistencias_detalle(inconsistencias_particulares, carpeta, "inconsistencias_particulares.txt")
+    #esto es para no guardar el fisico
+    guardar_inconsistencias_detalle(inconsistencias_normales, carpeta, "inconsistencias.txt")
+    guardar_inconsistencias_detalle(inconsistencias_particulares, carpeta, "inconsistencias_particulares.txt")
 
     return EXIT_SUCCESS
 
@@ -149,8 +149,8 @@ def main() -> int:
         return EXIT_JSON_ERROR
 
     carpeta_ejecucion = crear_directorio_ejecucion()
-
-    #guardar_reporte_json(json_data, carpeta_ejecucion)
+    #esto se comenta despues
+    guardar_reporte_json(json_data, carpeta_ejecucion)
 
     logger.info("Paso 4/4: Validando datos y generando reportes...")
     exit_code = procesar_reporte(json_data, carpeta_ejecucion)

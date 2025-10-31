@@ -66,7 +66,7 @@ def consultar_reporte_ucmdb(
 
     Returns:
         Optional[str]: Respuesta JSON en formato string si la consulta es exitosa,
-                      None si ocurre algún error después de todos los reintentos.
+            None si ocurre algún error después de todos los reintentos.
 
     Raises:
         ReportTimeoutError: Si se agotan los reintentos por timeout.
@@ -252,6 +252,10 @@ def extraer_datos_relevantes_servicecodes(
     return resultado
 
 
+def contar_letras(s: str) -> int:
+    return sum(1 for c in s if c.isalpha())
+
+
 def validar_nit_en_relaciones_invertidas(
     json_data: Dict[str, Any]
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
@@ -331,8 +335,8 @@ def validar_nit_en_relaciones_invertidas(
         nit_end2_norm = nit_end2.strip()
 
         if nit_end1_norm != nit_end2_norm:
-            # Detectar inconsistencia particular
-            if any(c.isalpha() for c in nit_end2_norm):
+            # Categorizamos como PARTÍCULAR si alguno de los NITs tiene letras (no solo end2, también end1)
+            if contar_letras(nit_end1_norm) > 0 or contar_letras(nit_end2_norm) > 0:
                 inconsistencias_particulares.append({
                     "ucmdbId": rel_id,
                     "nit_end1": nit_end1_norm,
@@ -344,6 +348,7 @@ def validar_nit_en_relaciones_invertidas(
                     "nit_end1": nit_end1_norm,
                     "nit_end2": nit_end2_norm,
                 })
+
 
         procesadas += 1
 
@@ -357,4 +362,3 @@ def validar_nit_en_relaciones_invertidas(
     logger.info("=" * 60)
 
     return inconsistencias_normales, inconsistencias_particulares
-
