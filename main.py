@@ -80,7 +80,7 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path) -> int:
 
     relaciones_fo_para_agregar = []
 
-    # Añadir campos display_label y organizar relaciones FO
+    # Procesar inconsistencias NORMALES
     for item in inconsistencias_normales:
         rel_id = item["ucmdbId"]
         rel_original = relations_by_id.get(rel_id)
@@ -119,6 +119,38 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path) -> int:
 
     inconsistencias_normales[:] = relaciones_fo_para_agregar
 
+    # Procesar inconsistencias PARTICULARES (igual que normales para enriquecer datos)
+    relaciones_particulares_enriquecidas = []
+    for item in inconsistencias_particulares:
+        rel_id = item["ucmdbId"]
+        rel_original = relations_by_id.get(rel_id)
+        if not rel_original:
+            continue
+        end1id = rel_original.get("end1Id")
+        end2id = rel_original.get("end2Id")
+        if not end2id or not end1id:
+            continue
+
+        item_actualizado = {
+            "ucmdbId": item["ucmdbId"],
+            "nit_end1": item.get("nit_end1"),
+            "nit_end2": item.get("nit_end2"),
+            "end1_ucmdbid": end1id,
+            "end2_ucmdbid": end2id,
+            "relacion_fo": False,
+            "ucmdbid_fo": "N/A"
+        }
+
+        # Añadir display_label de nodos
+        end1_node = cis_by_id.get(end1id)
+        end2_node = cis_by_id.get(end2id)
+        item_actualizado["end1_display_label"] = (end1_node.get("properties", {}).get("display_label") if end1_node else "N/A")
+        item_actualizado["end2_display_label"] = (end2_node.get("properties", {}).get("display_label") if end2_node else "N/A")
+
+        relaciones_particulares_enriquecidas.append(item_actualizado)
+
+    inconsistencias_particulares[:] = relaciones_particulares_enriquecidas
+
     # Logs estructurados y legibles para inconsistencias normales
     if inconsistencias_normales:
         logger.warning("Se detectaron inconsistencias normales:")
@@ -133,15 +165,18 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path) -> int:
     # Logs para inconsistencias particulares
     if inconsistencias_particulares:
         logger.warning("Se detectaron inconsistencias particulares:")
-        for item in inconsistencias_particulares:
-            logger.warning(f"  - Relación ucmdbId: {item['ucmdbId']}")
-            logger.warning(f"      NIT end1: {item['nit_end1']} vs NIT end2 (texto): {item['nit_end2']}")
+        for i, item in enumerate(inconsistencias_particulares, 1):
+            logger.warning(f"{i}. ucmdbId: {item['ucmdbId']}")
+            logger.warning(f"   NIT end1 (ucmdbId): {item.get('nit_end1', 'N/A')} ({item.get('end1_ucmdbid', 'N/A')} - {item.get('end1_display_label', 'N/A')})")
+            logger.warning(f"   NIT end2 (ucmdbId): {item.get('nit_end2', 'N/A')} ({item.get('end2_ucmdbid', 'N/A')} - {item.get('end2_display_label', 'N/A')})")
+            logger.warning("")
 
     # Guardar archivos txt con formato detallado
     guardar_inconsistencias_detalle(inconsistencias_normales, carpeta, "inconsistencias.txt")
     guardar_inconsistencias_detalle(inconsistencias_particulares, carpeta, "inconsistencias_particulares.txt")
 
     return EXIT_SUCCESS
+
 
 def guardar_inconsistencias_detalle(
     inconsistencias: List[Dict[str, Any]],
