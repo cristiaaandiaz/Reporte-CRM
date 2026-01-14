@@ -83,15 +83,39 @@ def consultar_reporte_ucmdb(
                 logger.info(f"Reporte obtenido exitosamente ({tamanio_mb:.2f} MB de datos)")
                 return response.text
             else:
+                # Guardar detalle del cuerpo para facilitar depuración
+                response_text = response.text or ""
                 mensaje = f"Error al consultar el reporte. Código HTTP: {response.status_code}"
                 logger.error(mensaje)
-                logger.debug(f"Detalle: {response.text[:500]}")
+                logger.error(f"Cuerpo de la respuesta: {response_text[:2000]}")
 
+                # Si es 4xx intentamos un intento alternativo con JSON (diagnóstico)
                 if 400 <= response.status_code < 500:
-                    raise ReportError(mensaje)
+                    logger.info("Intentando solicitud alternativa con JSON para diagnóstico...")
+                    try:
+                        alt_headers = headers.copy()
+                        alt_headers["Content-Type"] = "application/json"
+                        alt_payload = {"reportName": REPORT_NAME}
+                        alt_resp = requests.post(
+                            UCMDB_BASE_URL,
+                            json=alt_payload,
+                            headers=alt_headers,
+                            verify=False,
+                            timeout=timeouts,
+                        )
+                        logger.error(f"Alternativa: status {alt_resp.status_code}")
+                        logger.error(f"Alternativa cuerpo: {alt_resp.text[:2000]}")
+                        # Si la alternativa funciona, devolver su contenido
+                        if alt_resp.status_code == 200:
+                            return alt_resp.text
+                    except Exception as e:
+                        logger.exception(f"Fallo intento alternativo: {e}")
+
+                    # No sirvió la alternativa, propagar el mensaje original
+                    raise ReportError(f"{mensaje} - {response_text}")
 
                 if intento == reintentos:
-                    raise ReportError(mensaje)
+                    raise ReportError(f"{mensaje} - {response_text}")
 
                 logger.warning("Error del servidor, reintentando...")
                 continue
@@ -255,3 +279,56 @@ def validar_nit_en_relaciones_invertidas(
     logger.info("=" * 60)
 
     return inconsistencias_normales, inconsistencias_particulares
+
+
+def eliminar_relacion_ucmdb(token: str, relacion_id: str) -> bool:
+    """
+    Elimina una relación en UCMDB por su ucmdbId usando DELETE.
+
+    Args:
+        token (str): Token JWT de autenticación.
+        relacion_id (str): ucmdbId de la relación a eliminar.
+
+    Returns:
+        bool: True si la eliminación fue exitosa (200), False en caso de error.
+    """
+    url = f"https://ucmdbapp.triara.co:8443/rest-api/dataModel/relation/{relacion_id}"
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    # Implementar reintentos para mayor robustez en la eliminación
+    for intento in range(1, MAX_RETRIES + 1):
+        try:
+            response = requests.delete(
+                url,
+                headers=headers,
+                verify=False,
+                timeout=30
+            )
+            logger.info(f"DELETE {url} - Status: {response.status_code} (intento {intento}/{MAX_RETRIES})")
+
+            if response.status_code == 200:
+                logger.info(f"Relación {relacion_id} eliminada correctamente")
+                return True
+
+            # 4xx => fallo permanente, no reintentar
+            if 400 <= response.status_code < 500:
+                logger.warning(
+                    f"No se pudo eliminar la relación {relacion_id}: {response.status_code} - {response.text}"
+                )
+                return False
+
+            # 5xx => reintentar hasta agotar
+            logger.warning(
+                f"Respuesta {response.status_code} del servidor al eliminar {relacion_id}. Reintentando..."
+            )
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error en petición DELETE para {relacion_id} (intento {intento}): {e}")
+
+        # Esperar antes de reintentar (backoff simple)
+        if intento < MAX_RETRIES:
+            time.sleep(RETRY_DELAY * intento)
+
+    logger.error(f"No fue posible eliminar la relación {relacion_id} después de {MAX_RETRIES} intentos")
+    return False
