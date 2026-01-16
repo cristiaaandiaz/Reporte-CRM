@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from dotenv import load_dotenv
 from auth import obtener_token_ucmdb
 from report import (
     consultar_reporte_ucmdb,
@@ -14,6 +15,11 @@ from report import (
     validar_nit_en_relaciones_invertidas,
     eliminar_relacion_ucmdb,
 )
+import requests
+import base64
+
+# Cargar variables de entorno
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,10 +33,23 @@ logger = logging.getLogger(__name__)
 
 REPORTS_BASE_DIR = "reports"
 
-# CONTROL MANUAL (CAMBIA SÓLO ESTA LÍNEA):
-# - Si `ELIMINAR_RELACIONES = True` => se eliminarán las relaciones usando la API (ejecución REAL).
-# - Si `ELIMINAR_RELACIONES = False` => se simula la eliminación (DRY-RUN). Esto es lo recomendado para pruebas.
-ELIMINAR_RELACIONES = False
+# CONTROL MANUAL - MODO DE EJECUCIÓN ITSM:
+# - Si `MODO_ITSM = "simulacion"` => solo muestra qué se enviaría al API (DRY-RUN) - RECOMENDADO PRIMERO
+# - Si `MODO_ITSM = "ejecucion"` => ejecuta realmente el DELETE en ITSM (PRODUCCIÓN)
+MODO_ITSM = "simulacion"  # Cambiar a "ejecucion" cuando estés seguro
+
+# CONTROL MANUAL - GENERACIÓN DE ARCHIVOS DE RESUMEN:
+# - Si `GENERAR_RESUMEN = True` => genera resumen_itsm.txt con los resultados
+# - Si `GENERAR_RESUMEN = False` => no genera el archivo de resumen
+GENERAR_RESUMEN = False
+# CONTROL MANUAL - CREACIÓN DE CARPETA DE EJECUCIÓN:
+# - Si `CREAR_CARPETA_EJECUCION = True` => crea carpeta reports/ejecucion_TIMESTAMP con los archivos
+# - Si `CREAR_CARPETA_EJECUCION = False` => no crea la carpeta de ejecución
+CREAR_CARPETA_EJECUCION = False
+# Configuración ITSM desde .env
+ITSM_BASE_URL = os.getenv("ITSM_URL", "http://172.22.108.150:443/SM/9/rest/cirelationship1to1s")
+ITSM_USERNAME = os.getenv("ITSM_USERNAME", "AUTOSM")
+ITSM_PASSWORD = os.getenv("ITSM_PASSWORD", "4ut0SM2024.,")
 
 EXIT_SUCCESS = 0
 EXIT_AUTH_ERROR = 1
@@ -39,6 +58,15 @@ EXIT_JSON_ERROR = 3
 
 
 def crear_directorio_ejecucion() -> Path:
+    """
+    Crea directorio de ejecución solo si CREAR_CARPETA_EJECUCION es True.
+    Si está deshabilitado, devuelve un Path a un directorio temporal en memoria.
+    """
+    if not CREAR_CARPETA_EJECUCION:
+        logger.info("Creación de carpeta de ejecución deshabilitada (CREAR_CARPETA_EJECUCION=False)")
+        # Retorna un Path ficticio que no será usado para guardar archivos
+        return Path(REPORTS_BASE_DIR) / "disabled"
+    
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     carpeta_ejecucion = Path(REPORTS_BASE_DIR) / f"ejecucion_{timestamp}"
     carpeta_ejecucion.mkdir(parents=True, exist_ok=True)
@@ -50,6 +78,11 @@ def guardar_reporte_json(
     json_data: Dict[str, Any],
     carpeta: Path
 ) -> Optional[Path]:
+    # No guardar si la carpeta está deshabilitada
+    if carpeta.name == "disabled":
+        logger.info("Guardado de reporte JSON deshabilitado (CREAR_CARPETA_EJECUCION=False)")
+        return None
+    
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     archivo_reporte = carpeta / f"reporte_{timestamp}.json"
     try:
@@ -69,6 +102,11 @@ def guardar_inconsistencias_detalle(
 ) -> Optional[Path]:
     if not inconsistencias:
         logger.info(f"No se encontraron inconsistencias en {nombre_archivo}. No se generó archivo.")
+        return None
+
+    # No guardar si la carpeta está deshabilitada
+    if carpeta.name == "disabled":
+        logger.info(f"Guardado de {nombre_archivo} deshabilitado (CREAR_CARPETA_EJECUCION=False)")
         return None
 
     archivo = carpeta / nombre_archivo
@@ -99,6 +137,11 @@ def guardar_ids_simulados(ids: List[str], carpeta: Path) -> Optional[Path]:
     Guarda los IDs que se van a eliminar en producción.
     Esto sirve para validar después que se eliminaron los correctos.
     """
+    # No guardar si la carpeta está deshabilitada
+    if carpeta.name == "disabled":
+        logger.info("Guardado de IDs deshabilitado (CREAR_CARPETA_EJECUCION=False)")
+        return None
+    
     archivo = carpeta / "ids_a_eliminar_en_produccion.txt"
     try:
         with open(archivo, "w", encoding="utf-8") as f:
@@ -118,94 +161,223 @@ def eliminar_inconsistencias_normales_y_fo(
     token: str,
     inconsistencias_normales: List[Dict[str, Any]],
     carpeta: Path,
-    dry_run: bool = True
+    modo_itsm: str = "simulacion"
 ) -> None:
     """
-    Elimina inconsistencias normales y sus relaciones FO asociadas.
+    Procesa inconsistencias que tengan relacion_fo: true
+    y ejecuta/simula el DELETE en ITSM.
     
     Args:
-        token: Token de autenticación
-        inconsistencias_normales: Lista de inconsistencias a eliminar
+        token: Token de autenticación UCMDB (no se usa en ITSM pero se mantiene para compatibilidad)
+        inconsistencias_normales: Lista de inconsistencias
         carpeta: Carpeta para guardar resumen
-        dry_run: Si True, simula la eliminación sin hacer llamadas reales al API
+        modo_itsm: "simulacion" (DRY-RUN) o "ejecucion" (producción)
     """
     logger.info("=" * 60)
-    if dry_run:
-        logger.info("[DRY RUN] Simulando eliminación de inconsistencias normales")
-    else:
-        logger.critical("⚠️ [PRODUCCIÓN] Eliminando inconsistencias normales REALES")
+    logger.info("Procesando inconsistencias con relacion fo: true")
+    logger.info(f"Modo ITSM: {modo_itsm.upper()}")
     logger.info("=" * 60)
 
-    total_eliminadas = 0
-    resumen_eliminaciones = []
-    ids_a_eliminar_en_produccion = []  # Rastrear IDs simulados
+    # Filtrar solo las que tienen relacion_fo: true
+    inconsistencias_con_fo = [
+        item for item in inconsistencias_normales
+        if item.get("relacion_fo") and item.get("ucmdbid_fo") != "N/A"
+    ]
 
-    for idx, item in enumerate(inconsistencias_normales, 1):
-        rel_id = item["ucmdbId"]
-        ucmdbid_fo = item.get("ucmdbid_fo")
-        lista_ids = [rel_id]
+    logger.info(f"Total de inconsistencias con relacion fo: {len(inconsistencias_con_fo)}")
 
-        if ucmdbid_fo and ucmdbid_fo != "N/A":
-            lista_ids.append(ucmdbid_fo)
+    if not inconsistencias_con_fo:
+        logger.info("No hay inconsistencias con relacion fo para procesar.")
+        return
 
-        resultado_item = {
-            "numero": idx,
-            "ucmdbId_principal": rel_id,
-            "ucmdbId_fo": ucmdbid_fo if ucmdbid_fo != "N/A" else None,
-            "ids_eliminados": []
-        }
+    resumen_itsm = []
 
-        logger.warning(f"{idx}. Procesando relación: {rel_id}")
+    if modo_itsm == "simulacion":
+        logger.warning("[SIMULACIÓN] Se mostrarán las llamadas que se harían al API ITSM")
+        logger.warning("-" * 60)
         
-        for rid in lista_ids:
-            if dry_run:
-                # Simulación: solo loguea, no elimina
-                logger.info(f"   [DRY RUN] Se eliminaría: {rid}")
-                ids_a_eliminar_en_produccion.append(rid)  # Registra para validación
-                resultado_item["ids_eliminados"].append({
-                    "ucmdbId": rid,
-                    "exito": True,
-                    "simulado": True
+        for idx, item in enumerate(inconsistencias_con_fo, 1):
+            ucmdbid = item["ucmdbId"]
+            ucmdbid_fo = item["ucmdbid_fo"]
+            
+            # Construir URL del DELETE (primero el ucmdbid_fo, luego el ucmdbid)
+            url = f"{ITSM_BASE_URL}/{ucmdbid_fo}/{ucmdbid}"
+            
+            logger.warning(f"\n{idx}. SIMULACIÓN de DELETE en ITSM")
+            logger.warning(f"   URL: {url}")
+            logger.warning(f"   Método: DELETE")
+            logger.warning(f"   Auth: Basic Auth ({ITSM_USERNAME}/***)")
+            logger.warning(f"   ucmdbId: {ucmdbid}")
+            logger.warning(f"   ucmdbid_fo: {ucmdbid_fo}")
+            logger.warning(f"   Timeout: 30s")
+            
+            resumen_itsm.append({
+                "numero": idx,
+                "ucmdbId": ucmdbid,
+                "ucmdbid_fo": ucmdbid_fo,
+                "url": url,
+                "modo": "SIMULADO",
+                "estado": "Listo para ejecutarse"
+            })
+        
+        logger.warning("-" * 60)
+        logger.warning(f"\nTotal de llamadas a ITSM (simuladas): {len(inconsistencias_con_fo)}")
+        logger.warning("\n⚠️ Esto es una SIMULACIÓN. No se eliminó nada en ITSM.")
+        logger.warning("⚠️ Cuando estés seguro, cambia MODO_ITSM a 'ejecucion' en línea 36\n")
+        
+    elif modo_itsm == "ejecucion":
+        logger.critical("=" * 60)
+        logger.critical("⚠️ MODO PRODUCCIÓN: Ejecutando DELETE en ITSM")
+        logger.critical("=" * 60)
+        
+        for idx, item in enumerate(inconsistencias_con_fo, 1):
+            ucmdbid = item["ucmdbId"]
+            ucmdbid_fo = item["ucmdbid_fo"]
+            url = f"{ITSM_BASE_URL}/{ucmdbid_fo}/{ucmdbid}"
+            
+            logger.warning(f"\n{idx}. DELETE en ITSM")
+            logger.warning(f"   URL: {url}")
+            
+            exito, mensaje = ejecutar_delete_itsm(url)
+            
+            if exito:
+                logger.info(f"   ✓ Eliminada exitosamente")
+                resumen_itsm.append({
+                    "numero": idx,
+                    "ucmdbId": ucmdbid,
+                    "ucmdbid_fo": ucmdbid_fo,
+                    "url": url,
+                    "modo": "EJECUTADO",
+                    "estado": "Éxito",
+                    "mensaje": mensaje
                 })
             else:
-                # Eliminación real - CON VALIDACIÓN
-                try:
-                    exito = eliminar_relacion_ucmdb(token, rid)
-                    if not isinstance(exito, bool):
-                        logger.error(f"   ¡ERROR! eliminar_relacion_ucmdb retornó {type(exito).__name__} en lugar de bool: {rid}")
-                        exito = False
-                    
-                    resultado_item["ids_eliminados"].append({
-                        "ucmdbId": rid,
-                        "exito": exito,
-                        "simulado": False
-                    })
-                    if exito:
-                        logger.info(f"   ✓ Eliminada: {rid}")
-                    else:
-                        logger.error(f"   ✗ FALLO al eliminar: {rid}")
-                except Exception as e:
-                    logger.error(f"   ✗ EXCEPCIÓN al eliminar {rid}: {e}")
-                    resultado_item["ids_eliminados"].append({
-                        "ucmdbId": rid,
-                        "exito": False,
-                        "simulado": False,
-                        "error": str(e)
-                    })
-
-        resumen_eliminaciones.append(resultado_item)
-        total_eliminadas += 1
-
-    logger.info("=" * 60)
-    logger.info(f"Total de procesos de eliminación: {total_eliminadas}")
-    logger.info("=" * 60)
-
-    # Guardar resumen
-    guardar_resumen_eliminacion_detallado(resumen_eliminaciones, carpeta, dry_run)
+                logger.error(f"   ✗ FALLO: {mensaje}")
+                resumen_itsm.append({
+                    "numero": idx,
+                    "ucmdbId": ucmdbid,
+                    "ucmdbid_fo": ucmdbid_fo,
+                    "url": url,
+                    "modo": "EJECUTADO",
+                    "estado": "Fallo",
+                    "mensaje": mensaje
+                })
     
-    # Guardar lista de IDs simulados para comparar después en producción
-    if dry_run:
-        guardar_ids_simulados(ids_a_eliminar_en_produccion, carpeta)
+    # Guardar resumen
+    guardar_resumen_itsm(resumen_itsm, carpeta, modo_itsm)
+
+
+def ejecutar_delete_itsm(url: str) -> tuple[bool, str]:
+    """
+    Ejecuta DELETE en ITSM con reintentos.
+    
+    Returns:
+        Tupla (éxito: bool, mensaje: str)
+    """
+    # Crear header de autenticación Basic Auth
+    credenciales = f"{ITSM_USERNAME}:{ITSM_PASSWORD}"
+    credenciales_encoded = base64.b64encode(credenciales.encode()).decode()
+    
+    headers = {
+        "Authorization": f"Basic {credenciales_encoded}",
+        "Content-Type": "application/json"
+    }
+    
+    max_reintentos = 3
+    delay_reintento = 2
+    
+    for intento in range(1, max_reintentos + 1):
+        try:
+            logger.info(f"   Intento {intento}/{max_reintentos}...")
+            
+            response = requests.delete(
+                url,
+                headers=headers,
+                verify=False,
+                timeout=30
+            )
+            
+            logger.info(f"   Respuesta HTTP: {response.status_code}")
+            
+            # Códigos de éxito
+            if response.status_code in [200, 202, 204]:
+                return True, f"HTTP {response.status_code}"
+            
+            # Error permanente (4xx) - no reintentar
+            if 400 <= response.status_code < 500:
+                return False, f"Error permanente HTTP {response.status_code}"
+            
+            # Error temporal (5xx) - reintentar
+            if 500 <= response.status_code < 600:
+                if intento < max_reintentos:
+                    logger.warning(f"   Error servidor (HTTP {response.status_code}), reintentando...")
+                    import time
+                    time.sleep(delay_reintento)
+                    continue
+                else:
+                    return False, f"Error servidor HTTP {response.status_code} después de {max_reintentos} intentos"
+        
+        except requests.exceptions.Timeout:
+            logger.warning(f"   Timeout, reintentando...")
+            if intento < max_reintentos:
+                import time
+                time.sleep(delay_reintento)
+                continue
+            return False, f"Timeout después de {max_reintentos} intentos"
+        
+        except Exception as e:
+            logger.error(f"   Error: {e}")
+            if intento < max_reintentos:
+                import time
+                time.sleep(delay_reintento)
+                continue
+            return False, str(e)
+    
+    return False, "Error desconocido"
+
+
+def guardar_resumen_itsm(
+    resumen: List[Dict[str, Any]],
+    carpeta: Path,
+    modo_itsm: str
+) -> Optional[Path]:
+    """
+    Guarda resumen de las operaciones ITSM.
+    Solo genera el archivo si GENERAR_RESUMEN es True.
+    """
+    if not GENERAR_RESUMEN:
+        logger.info("Generación de resumen ITSM deshabilitada (GENERAR_RESUMEN=False)")
+        return None
+    
+    # No guardar si la carpeta está deshabilitada
+    if carpeta.name == "disabled":
+        logger.info("Guardado de resumen ITSM deshabilitado (CREAR_CARPETA_EJECUCION=False)")
+        return None
+    
+    archivo = carpeta / "resumen_itsm.txt"
+    
+    try:
+        with open(archivo, "w", encoding="utf-8") as f:
+            modo_titulo = "SIMULACIÓN" if modo_itsm == "simulacion" else "EJECUCIÓN"
+            f.write(f"Resumen de Operaciones ITSM - {modo_titulo}\n")
+            f.write(f"Fecha: {datetime.now().isoformat()}\n")
+            f.write(f"Modo: {modo_itsm.upper()}\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for item in resumen:
+                f.write(f"{item['numero']}. ucmdbId: {item['ucmdbId']}\n")
+                f.write(f"   ucmdbid_fo: {item['ucmdbid_fo']}\n")
+                f.write(f"   URL: {item['url']}\n")
+                f.write(f"   Estado: {item['estado']}\n")
+                if "mensaje" in item:
+                    f.write(f"   Mensaje: {item['mensaje']}\n")
+                f.write("\n")
+        
+        logger.info(f"Resumen ITSM guardado en: {archivo}")
+        return archivo
+    except IOError as e:
+        logger.error(f"Error al guardar resumen ITSM: {e}")
+        return None
 
 
 def guardar_resumen_eliminacion_detallado(
@@ -214,8 +386,13 @@ def guardar_resumen_eliminacion_detallado(
     dry_run: bool = True
 ) -> Optional[Path]:
     """
-    Guarda un resumen detallado de las eliminaciones.
+    Guarda un resumen detallado de las eliminaciones UCMDB (función obsoleta, se mantiene para compatibilidad).
     """
+    # No guardar si la carpeta está deshabilitada
+    if carpeta.name == "disabled":
+        logger.info("Guardado de resumen de eliminación deshabilitado (CREAR_CARPETA_EJECUCION=False)")
+        return None
+    
     archivo = carpeta / "resumen_eliminacion.txt"
 
     try:
@@ -362,28 +539,17 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path, token: str) -> in
     guardar_inconsistencias_detalle(inconsistencias_normales, carpeta, "inconsistencias.txt")
     guardar_inconsistencias_detalle(inconsistencias_particulares, carpeta, "inconsistencias_particulares.txt")
 
-    # Configurar modo a partir de la constante `ELIMINAR_RELACIONES` (línea única arriba)
-    # dry_run_mode == True -> solo simula; False -> realiza llamadas DELETE
-    dry_run_mode = not ELIMINAR_RELACIONES
-
-    if not dry_run_mode:
-        logger.critical("\n" + "⚠️ " * 30)
-        logger.critical("¡ADVERTENCIA! MODO PRODUCCIÓN ACTIVADO")
-        logger.critical("Se eliminarán relaciones REALES en UCMDB")
-        logger.critical("⚠️ " * 30 + "\n")
-
-    eliminar_inconsistencias_normales_y_fo(token, inconsistencias_normales, carpeta, dry_run=dry_run_mode)
+    # Procesar inconsistencias con relacion_fo: true
+    # Pasar el MODO_ITSM configurado arriba
+    eliminar_inconsistencias_normales_y_fo(token, inconsistencias_normales, carpeta, modo_itsm=MODO_ITSM)
 
     return EXIT_SUCCESS
 
 
 def main() -> int:
-    # Control manual: cambia la constante ELIMINAR_RELACIONES arriba en el archivo
-    final_enable = ELIMINAR_RELACIONES
-
     logger.info("=" * 60)
     logger.info("Iniciando validación de consistencia de NITs en UCMDB")
-    logger.info(f"Modo eliminaciones reales: {'ENABLED' if final_enable else 'DRY-RUN'}")
+    logger.info(f"Modo ITSM: {MODO_ITSM}")
     logger.info("=" * 60)
 
     logger.info("Paso 1/4: Autenticando con UCMDB...")
