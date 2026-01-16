@@ -41,11 +41,11 @@ MODO_ITSM = "simulacion"  # Cambiar a "ejecucion" cuando estés seguro
 # CONTROL MANUAL - GENERACIÓN DE ARCHIVOS DE RESUMEN:
 # - Si `GENERAR_RESUMEN = True` => genera resumen_itsm.txt con los resultados
 # - Si `GENERAR_RESUMEN = False` => no genera el archivo de resumen
-GENERAR_RESUMEN = False
+GENERAR_RESUMEN = True
 # CONTROL MANUAL - CREACIÓN DE CARPETA DE EJECUCIÓN:
 # - Si `CREAR_CARPETA_EJECUCION = True` => crea carpeta reports/ejecucion_TIMESTAMP con los archivos
 # - Si `CREAR_CARPETA_EJECUCION = False` => no crea la carpeta de ejecución
-CREAR_CARPETA_EJECUCION = False
+CREAR_CARPETA_EJECUCION = True
 # Configuración ITSM desde .env
 ITSM_BASE_URL = os.getenv("ITSM_URL", "http://172.22.108.150:443/SM/9/rest/cirelationship1to1s")
 ITSM_USERNAME = os.getenv("ITSM_USERNAME", "AUTOSM")
@@ -301,37 +301,45 @@ def ejecutar_delete_itsm(url: str) -> tuple[bool, str]:
             
             # Códigos de éxito
             if response.status_code in [200, 202, 204]:
-                return True, f"HTTP {response.status_code}"
+                return True, f"[ITSM-DELETE] {response.status_code} OK"
             
             # Error permanente (4xx) - no reintentar
             if 400 <= response.status_code < 500:
-                return False, f"Error permanente HTTP {response.status_code}"
+                return False, f"[ITSM-DELETE] {response.status_code} - Error permanente: {response.text[:100]}"
             
             # Error temporal (5xx) - reintentar
             if 500 <= response.status_code < 600:
                 if intento < max_reintentos:
-                    logger.warning(f"   Error servidor (HTTP {response.status_code}), reintentando...")
+                    logger.warning(f"   [ITSM-DELETE] {response.status_code} - Reintentando ({intento}/{max_reintentos})...")
                     import time
                     time.sleep(delay_reintento)
                     continue
                 else:
-                    return False, f"Error servidor HTTP {response.status_code} después de {max_reintentos} intentos"
+                    return False, f"[ITSM-DELETE] {response.status_code} - Servidor error (agotados {max_reintentos} intentos)"
         
         except requests.exceptions.Timeout:
-            logger.warning(f"   Timeout, reintentando...")
+            logger.warning(f"   [ITSM-DELETE] TIMEOUT - Reintentando ({intento}/{max_reintentos})...")
             if intento < max_reintentos:
                 import time
                 time.sleep(delay_reintento)
                 continue
-            return False, f"Timeout después de {max_reintentos} intentos"
+            return False, f"[ITSM-DELETE] TIMEOUT - Agotados {max_reintentos} intentos"
+        
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"   [ITSM-DELETE] CONEXIÓN ERROR - Reintentando ({intento}/{max_reintentos})...")
+            if intento < max_reintentos:
+                import time
+                time.sleep(delay_reintento)
+                continue
+            return False, f"[ITSM-DELETE] CONEXIÓN ERROR: {str(e)[:80]}"
         
         except Exception as e:
-            logger.error(f"   Error: {e}")
+            logger.error(f"   [ITSM-DELETE] ERROR INESPERADO: {str(e)[:100]}")
             if intento < max_reintentos:
                 import time
                 time.sleep(delay_reintento)
                 continue
-            return False, str(e)
+            return False, f"[ITSM-DELETE] ERROR: {str(e)[:80]}"
     
     return False, "Error desconocido"
 

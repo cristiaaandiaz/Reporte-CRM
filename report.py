@@ -185,8 +185,9 @@ def extraer_datos_relevantes_servicecodes(cis_filtrados: List[Dict[str, Any]]) -
     return resultado
 
 
-def contar_letras(s: str) -> int:
-    return sum(1 for c in s if c.isalpha())
+def contar_letras(s: str) -> bool:
+    """Retorna True si hay al menos una letra (optimizado para validación)."""
+    return any(c.isalpha() for c in s)
 
 
 def validar_nit_en_relaciones_invertidas(
@@ -215,16 +216,14 @@ def validar_nit_en_relaciones_invertidas(
     nits_faltantes = 0
     procesadas = 0
 
-    progreso_cada = max(len(relaciones) // 10, 1)
+    progreso_cada = max(len(relaciones) // 5, 1)
 
     for idx, rel in enumerate(relaciones, 1):
         if idx % progreso_cada == 0:
             porcentaje = (idx / len(relaciones)) * 100
             logger.info(
-                f"Progreso: {idx}/{len(relaciones)} relaciones "
-                f"({porcentaje:.1f}%) - "
-                f"Inconsistencias normales: {len(inconsistencias_normales)} - "
-                f"Inconsistencias particulares: {len(inconsistencias_particulares)}"
+                f"[{porcentaje:.0f}%] {idx}/{len(relaciones)} | "
+                f"Normales: {len(inconsistencias_normales)}, Particulares: {len(inconsistencias_particulares)}"
             )
 
         rel_id = rel.get("ucmdbId")
@@ -236,10 +235,7 @@ def validar_nit_en_relaciones_invertidas(
 
         if not nodo_end1 or not nodo_end2:
             nodos_faltantes += 1
-            logger.debug(
-                f"Relación {rel_id}: nodos no encontrados "
-                f"(end1: {end1_id}, end2: {end2_id})"
-            )
+            logger.debug(f"Relación {rel_id}: nodo faltante (end1={end1_id}, end2={end2_id})")
             continue
 
         nit_end1 = nodo_end1.get("properties", {}).get(NIT_FIELD_END1)
@@ -254,7 +250,7 @@ def validar_nit_en_relaciones_invertidas(
         nit_end2_norm = nit_end2.strip()
 
         if nit_end1_norm != nit_end2_norm:
-            if contar_letras(nit_end1_norm) > 0 or contar_letras(nit_end2_norm) > 0:
+            if contar_letras(nit_end1_norm) or contar_letras(nit_end2_norm):
                 inconsistencias_particulares.append({
                     "ucmdbId": rel_id,
                     "nit_end1": nit_end1_norm,
@@ -314,7 +310,7 @@ def eliminar_relacion_ucmdb(token: str, relacion_id: str) -> bool:
             # 4xx => fallo permanente, no reintentar
             if 400 <= response.status_code < 500:
                 logger.warning(
-                    f"No se pudo eliminar la relación {relacion_id}: {response.status_code} - {response.text}"
+                    f"[UCMDB-DELETE] {response.status_code} - Relación {relacion_id}: {response.text[:150]}"
                 )
                 return False
 
@@ -323,12 +319,16 @@ def eliminar_relacion_ucmdb(token: str, relacion_id: str) -> bool:
                 f"Respuesta {response.status_code} del servidor al eliminar {relacion_id}. Reintentando..."
             )
 
+        except requests.exceptions.Timeout:
+            logger.error(f"[UCMDB-DELETE] TIMEOUT - Relación {relacion_id} ({intento}/{MAX_RETRIES})")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[UCMDB-DELETE] CONEXIÓN ERROR - Relación {relacion_id}: {str(e)[:80]}")
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error en petición DELETE para {relacion_id} (intento {intento}): {e}")
+            logger.error(f"[UCMDB-DELETE] ERROR - Relación {relacion_id}: {str(e)[:80]}")
 
         # Esperar antes de reintentar (backoff simple)
         if intento < MAX_RETRIES:
             time.sleep(RETRY_DELAY * intento)
 
-    logger.error(f"No fue posible eliminar la relación {relacion_id} después de {MAX_RETRIES} intentos")
+    logger.error(f"[UCMDB-DELETE] FALLO FINAL - Relación {relacion_id} ({MAX_RETRIES} intentos agotados)")
     return False
