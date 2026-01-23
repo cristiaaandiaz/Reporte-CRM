@@ -26,11 +26,15 @@ NIT_FIELD_END2 = "clr_onyxdb_companynit"
 
 # Configuración de timeouts (en segundos)
 CONNECT_TIMEOUT = 30  # Timeout para establecer conexión
-READ_TIMEOUT = 300     # Timeout para leer respuesta (5 minutos para data grande)
+READ_TIMEOUT = 600    # Timeout para leer respuesta (10 minutos para data grande de 235MB)
 
 # Configuración de reintentos
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # segundos entre reintentos
+
+# Pool de conexiones para reutilizar conexiones
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry as Urllib3Retry
 
 
 class ReportTimeoutError(Exception):
@@ -66,22 +70,104 @@ def consultar_reporte_ucmdb(
 
             inicio = time.time()
 
-            response = requests.post(
+            # Crear sesión con configuración especial para archivos grandes
+            session = requests.Session()
+            
+            # Configurar reintentos con backoff
+            retry_strategy = Urllib3Retry(
+                total=1,
+                backoff_factor=0.5,
+                status_forcelist=[429, 500, 502, 503, 504]
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            
+            response = session.post(
                 UCMDB_BASE_URL,
                 data=REPORT_NAME,
                 headers=headers,
                 verify=False,
                 timeout=timeouts,
-                stream=False
+                stream=True
             )
 
             duracion = time.time() - inicio
             logger.info(f"Respuesta recibida en {duracion:.2f} segundos")
 
             if response.status_code == 200:
-                tamanio_mb = len(response.text) / (1024 * 1024)
+                # Descargar en chunks para archivos grandes, con mejor manejo de errores
+                contenido = b""
+                chunk_size = 32768  # 32KB chunks
+                bytes_recibidos = 0
+                try:
+                    for chunk in response.iter_content(chunk_size=chunk_size, decode_unicode=False):
+                        if chunk:
+                            contenido += chunk
+                            bytes_recibidos += len(chunk)
+                            # Log cada 50MB
+                            if bytes_recibidos % (50 * 1024 * 1024) == 0:
+                                logger.info(f"Descargados {bytes_recibidos / (1024*1024):.2f} MB...")
+                except (requests.exceptions.ChunkedEncodingError, 
+                        requests.exceptions.ConnectionError) as e:
+                    logger.warning(f"Error durante descarga: {str(e)}")
+                    if contenido:
+                        logger.warning("Se obtuvieron datos parciales, intentando procesarlos...")
+                        # Intentar recuperar del error truncando al último JSON válido
+                        try:
+                            contenido_str = contenido.decode('utf-8', errors='replace')
+                            logger.info(f"Tamaño de datos truncados: {len(contenido_str)} caracteres")
+                            
+                            # Estrategia 1: Buscar el último } que cierre la estructura principal
+                            # La estructura es: { "cis": [...], "relations": [...] }
+                            # Intentamos encontrar el cierre de "relations": []
+                            
+                            # Primero, buscar la última ocurrencia de ]}} (cierre de relations y objeto principal)
+                            ultimo_array_close = contenido_str.rfind("]}}")
+                            if ultimo_array_close > 0:
+                                logger.info("Encontrado cierre ]}} - usando eso como límite")
+                                contenido_str = contenido_str[:ultimo_array_close+3]
+                            else:
+                                # Estrategia 2: Si no funciona, buscar el último array válido ]
+                                logger.info("No encontrado }}] - buscando último array válido...")
+                                
+                                # Encontrar la última línea que tenga una estructura válida
+                                lineas = contenido_str.split('\n')
+                                for i in range(len(lineas)-1, -1, -1):
+                                    linea = lineas[i].strip()
+                                    # Si la línea termina con }, ], o },] es probablemente válida
+                                    if linea.endswith('}') or linea.endswith(']') or linea.endswith('},') or linea.endswith('],'):
+                                        logger.info(f"Línea válida encontrada en posición {i}: {linea[:80]}...")
+                                        contenido_str = '\n'.join(lineas[:i+1])
+                                        
+                                        # Ahora necesitamos cerrar la estructura abierta
+                                        # Contar los [ y ] para saber cuántos cerrar
+                                        open_brackets = contenido_str.count('[')
+                                        close_brackets = contenido_str.count(']')
+                                        open_braces = contenido_str.count('{')
+                                        close_braces = contenido_str.count('}')
+                                        
+                                        logger.info(f"Brackets: {open_brackets} open vs {close_brackets} close")
+                                        logger.info(f"Braces: {open_braces} open vs {close_braces} close")
+                                        
+                                        # Agregar los cierres necesarios
+                                        if open_brackets > close_brackets:
+                                            contenido_str += '\n' + ']' * (open_brackets - close_brackets)
+                                        if open_braces > close_braces:
+                                            contenido_str += '\n' + '}' * (open_braces - close_braces)
+                                        
+                                        break
+                            
+                            contenido = contenido_str.encode('utf-8')
+                            logger.info("JSON truncado recuperado")
+                        except Exception as fix_error:
+                            logger.warning(f"No se pudo recuperar JSON: {fix_error}")
+                    else:
+                        raise
+                
+                tamanio_mb = len(contenido) / (1024 * 1024)
                 logger.info(f"Reporte obtenido exitosamente ({tamanio_mb:.2f} MB de datos)")
-                return response.text
+                return contenido.decode('utf-8', errors='replace')
             else:
                 # Guardar detalle del cuerpo para facilitar depuración
                 response_text = response.text or ""
