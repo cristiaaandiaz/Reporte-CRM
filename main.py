@@ -202,6 +202,7 @@ def ejecutar_update_itsm(url: str) -> Tuple[bool, str]:
     """
     # Validación crítica: URL no debe estar vacía
     if not url or not url.strip():
+        logger.error("URL vacía recibida en ejecutar_update_itsm")
         return False, "URL vacía"
     
     headers = _crear_headers_itsm()
@@ -294,7 +295,7 @@ def eliminar_en_itsm(
     if not ITSM_BASE_URL:
         logger.error("ERROR CRÍTICO: ITSM_BASE_URL no está configurada en .env")
         logger.error("  Requerida: ITSM_BASE_URL (ej: https://servidor:puerto/SM/9/rest)")
-        return
+        return None
     
     logger.info(f"ITSM_BASE_URL configurada: {ITSM_BASE_URL}")
     
@@ -315,7 +316,7 @@ def eliminar_en_itsm(
     
     if not relaciones_validas:
         logger.info("No hay inconsistencias con relacion_fo válida para procesar")
-        return
+        return None
     
     resumen = []
     exitosas = 0
@@ -515,7 +516,7 @@ def eliminar_en_ucmdb(
     
     if not inconsistencias:
         logger.info("No hay inconsistencias para procesar")
-        return
+        return None
     
     exitosas = 0
     fallidas = 0
@@ -593,13 +594,10 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path, token: str) -> in
     relaciones_enriquecidas_normales = []
     for item in inconsistencias_normales:
         rel_id = item["ucmdbId"]
-        rel_original = relations_by_id.get(rel_id)
-        if not rel_original:
-            continue
+        end1id = item.get("end1Id")
+        end2id = item.get("end2Id")
         
-        end1id = rel_original.get("end1Id")
-        end2id = rel_original.get("end2Id")
-        if not end2id or not end1id:
+        if not end1id or not end2id:
             continue
         
         # Buscar relación FO
@@ -631,13 +629,10 @@ def procesar_reporte(json_data: Dict[str, Any], carpeta: Path, token: str) -> in
     relaciones_enriquecidas_particulares = []
     for item in inconsistencias_particulares:
         rel_id = item["ucmdbId"]
-        rel_original = relations_by_id.get(rel_id)
-        if not rel_original:
-            continue
+        end1id = item.get("end1Id")
+        end2id = item.get("end2Id")
         
-        end1id = rel_original.get("end1Id")
-        end2id = rel_original.get("end2Id")
-        if not end2id or not end1id:
+        if not end1id or not end2id:
             continue
         
         end1_node = cis_by_id.get(end1id)
@@ -726,22 +721,44 @@ def main() -> int:
         logger.warning(f"Primer intento de JSON falló: {e}")
         logger.info("Intentando recuperar JSON truncado...")
         try:
-            # Si el JSON está truncado, intentar agregando cierre
             reporte_fixed = reporte
             
-            # Contar [ abiertos vs ] cerrados
-            open_brackets = reporte.count('[')
-            close_brackets = reporte.count(']')
-            open_braces = reporte.count('{')
-            close_braces = reporte.count('}')
+            # Estrategia MEJORADA: Buscar última estructura JSON COMPLETA
+            # El error "Expecting ','" significa truncamiento DENTRO de una propiedad
+            # Buscar último }, o ], (fin de elemento completo)
+            ultima_obj_close = reporte_fixed.rfind('},')
+            ultima_arr_close = reporte_fixed.rfind('],')
+            mejor_posicion = max(ultima_obj_close, ultima_arr_close)
             
+            if mejor_posicion > 0:
+                reporte_fixed = reporte_fixed[:mejor_posicion + 2]
+                logger.info(f"Truncado en estructura completa (posición {mejor_posicion})")
+            
+            # Limpiar y balancear
+            reporte_fixed = reporte_fixed.rstrip()
+            while reporte_fixed.endswith(','):
+                reporte_fixed = reporte_fixed[:-1]
+            
+            # Contar brackets y braces
+            open_brackets = reporte_fixed.count('[')
+            close_brackets = reporte_fixed.count(']')
+            open_braces = reporte_fixed.count('{')
+            close_braces = reporte_fixed.count('}')
+            
+            logger.info(f"Conteo final: [ {open_brackets} vs ] {close_brackets}, {{ {open_braces} vs }} {close_braces}")
+            
+            # Cerrar estructuras
             if open_brackets > close_brackets:
                 reporte_fixed += ']' * (open_brackets - close_brackets)
+                logger.info(f"Agregados {open_brackets - close_brackets} ] finales")
+            
             if open_braces > close_braces:
                 reporte_fixed += '}' * (open_braces - close_braces)
+                logger.info(f"Agregados {open_braces - close_braces} }} finales")
             
+            # Intentar parsear nuevamente
             json_data = json.loads(reporte_fixed)
-            logger.info("JSON truncado recuperado exitosamente")
+            logger.info("JSON truncado recuperado exitosamente tras balanceo")
         except json.JSONDecodeError as e2:
             logger.error(f"JSON inválido incluso después de recuperación: {e2}")
             return EXIT_JSON_ERROR

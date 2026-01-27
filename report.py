@@ -26,11 +26,11 @@ NIT_FIELD_END2 = "clr_onyxdb_companynit"
 
 # Configuración de timeouts (en segundos)
 CONNECT_TIMEOUT = 30  # Timeout para establecer conexión
-READ_TIMEOUT = 600    # Timeout para leer respuesta (10 minutos para data grande de 235MB)
+READ_TIMEOUT = 900    # Timeout para leer respuesta (10 minutos para data grande de 235MB)
 
 # Configuración de reintentos
-MAX_RETRIES = 3
-RETRY_DELAY = 5  # segundos entre reintentos
+MAX_RETRIES = 5
+RETRY_DELAY = 10  # segundos entre reintentos
 
 # Pool de conexiones para reutilizar conexiones
 from requests.adapters import HTTPAdapter
@@ -118,48 +118,59 @@ def consultar_reporte_ucmdb(
                             contenido_str = contenido.decode('utf-8', errors='replace')
                             logger.info(f"Tamaño de datos truncados: {len(contenido_str)} caracteres")
                             
-                            # Estrategia 1: Buscar el último } que cierre la estructura principal
-                            # La estructura es: { "cis": [...], "relations": [...] }
-                            # Intentamos encontrar el cierre de "relations": []
+                            # ESTRATEGIA MEJORADA: Buscar última estructura JSON COMPLETA
+                            # El error "Expecting ','" significa truncamiento DENTRO de una propiedad
+                            # Solución: Buscar último }, o ], válido (cierre de objeto/array)
                             
-                            # Primero, buscar la última ocurrencia de ]}} (cierre de relations y objeto principal)
-                            ultimo_array_close = contenido_str.rfind("]}}")
-                            if ultimo_array_close > 0:
-                                logger.info("Encontrado cierre ]}} - usando eso como límite")
-                                contenido_str = contenido_str[:ultimo_array_close+3]
+                            # Paso 1: Buscar la ÚLTIMA OCURRENCIA DE:
+                            # 1a) }, (cierre de objeto con coma)
+                            # 1b) ], (cierre de array con coma) 
+                            # Estos patrones indican FIN DE UN ELEMENTO COMPLETO
+                            
+                            ultima_obj_close = contenido_str.rfind('},')
+                            ultima_arr_close = contenido_str.rfind('],')
+                            
+                            # Tomar la posición más lejana (la más reciente válida)
+                            mejor_posicion = max(ultima_obj_close, ultima_arr_close)
+                            
+                            if mejor_posicion > 0:
+                                # Truncar justo después de la coma
+                                contenido_str = contenido_str[:mejor_posicion + 2]  # +2 para incluir }, o ],
+                                logger.info(f"Truncado en estructura completa en posición {mejor_posicion}")
                             else:
-                                # Estrategia 2: Si no funciona, buscar el último array válido ]
-                                logger.info("No encontrado }}] - buscando último array válido...")
-                                
-                                # Encontrar la última línea que tenga una estructura válida
-                                lineas = contenido_str.split('\n')
-                                for i in range(len(lineas)-1, -1, -1):
-                                    linea = lineas[i].strip()
-                                    # Si la línea termina con }, ], o },] es probablemente válida
-                                    if linea.endswith('}') or linea.endswith(']') or linea.endswith('},') or linea.endswith('],'):
-                                        logger.info(f"Línea válida encontrada en posición {i}: {linea[:80]}...")
-                                        contenido_str = '\n'.join(lineas[:i+1])
-                                        
-                                        # Ahora necesitamos cerrar la estructura abierta
-                                        # Contar los [ y ] para saber cuántos cerrar
-                                        open_brackets = contenido_str.count('[')
-                                        close_brackets = contenido_str.count(']')
-                                        open_braces = contenido_str.count('{')
-                                        close_braces = contenido_str.count('}')
-                                        
-                                        logger.info(f"Brackets: {open_brackets} open vs {close_brackets} close")
-                                        logger.info(f"Braces: {open_braces} open vs {close_braces} close")
-                                        
-                                        # Agregar los cierres necesarios
-                                        if open_brackets > close_brackets:
-                                            contenido_str += '\n' + ']' * (open_brackets - close_brackets)
-                                        if open_braces > close_braces:
-                                            contenido_str += '\n' + '}' * (open_braces - close_braces)
-                                        
-                                        break
+                                # Si no encuentra }, o ], buscar el último }
+                                ultimo_close = contenido_str.rfind('}')
+                                if ultimo_close > 0:
+                                    contenido_str = contenido_str[:ultimo_close + 1]
+                                    logger.info(f"Truncado en último }} en posición {ultimo_close}")
+                            
+                            # Paso 2: Limpiar espacios finales
+                            contenido_str = contenido_str.rstrip()
+                            
+                            # Paso 3: Si termina en coma, remover (elemento incompleto)
+                            while contenido_str.endswith(','):
+                                contenido_str = contenido_str[:-1]
+                            
+                            # Paso 4: Asegurar que la estructura es cerrada completamente
+                            # Contar brackets y braces
+                            open_brackets = contenido_str.count('[')
+                            close_brackets = contenido_str.count(']')
+                            open_braces = contenido_str.count('{')
+                            close_braces = contenido_str.count('}')
+                            
+                            logger.info(f"Conteo: [ {open_brackets} vs ] {close_brackets}, {{ {open_braces} vs }} {close_braces}")
+                            
+                            # Paso 5: Agregar EXACTAMENTE los cierres necesarios
+                            if open_brackets > close_brackets:
+                                contenido_str += ']' * (open_brackets - close_brackets)
+                                logger.info(f"Agregados {open_brackets - close_brackets} ] finales")
+                            
+                            if open_braces > close_braces:
+                                contenido_str += '}' * (open_braces - close_braces)
+                                logger.info(f"Agregados {open_braces - close_braces} }} finales")
                             
                             contenido = contenido_str.encode('utf-8')
-                            logger.info("JSON truncado recuperado")
+                            logger.info("JSON truncado recuperado y cerrado")
                         except Exception as fix_error:
                             logger.warning(f"No se pudo recuperar JSON: {fix_error}")
                     else:
@@ -341,12 +352,16 @@ def validar_nit_en_relaciones_invertidas(
                     "ucmdbId": rel_id,
                     "nit_end1": nit_end1_norm,
                     "nit_end2": nit_end2_norm,
+                    "end1Id": end1_id,
+                    "end2Id": end2_id
                 })
             else:
                 inconsistencias_normales.append({
                     "ucmdbId": rel_id,
                     "nit_end1": nit_end1_norm,
                     "nit_end2": nit_end2_norm,
+                    "end1Id": end1_id,
+                    "end2Id": end2_id
                 })
 
         procesadas += 1
