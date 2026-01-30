@@ -494,6 +494,11 @@ def eliminar_en_ucmdb(
 ) -> None:
     """
     Procesa eliminaciones en UCMDB para TODAS las relaciones normales.
+    
+    Para cada relación:
+    - SI relacion_fo = true: Elimina AMBOS ucmdbId + ucmdbid_fo (2 DELETE calls)
+    - SI relacion_fo = false: Elimina SOLO ucmdbId (1 DELETE call)
+    
     Endpoint: DELETE /dataModel/relation/{ucmdbid}
     
     Args:
@@ -520,35 +525,60 @@ def eliminar_en_ucmdb(
     
     exitosas = 0
     fallidas = 0
+    total_deletes = 0
     
     for idx, item in enumerate(inconsistencias, 1):
         ucmdbid = item.get("ucmdbId")
-        url = f"{UCMDB_DELETE_ENDPOINT}/{ucmdbid}"
+        relacion_fo = item.get("relacion_fo", False)
+        ucmdbid_fo = item.get("ucmdbid_fo", "N/A")
         
         logger.info(f"[{idx}/{total}] Procesando: {ucmdbid}")
-        logger.debug(f"  URL: {url}")
+        
+        # SIEMPRE eliminar el ucmdbId principal
+        url_principal = f"{UCMDB_DELETE_ENDPOINT}/{ucmdbid}"
+        logger.debug(f"  URL principal: {url_principal}")
         
         if MODO_EJECUCION == "ejecucion":
-            # EJECUCIÓN REAL con reintentos
-            exito, mensaje = ejecutar_delete_ucmdb(url, token)
+            exito, mensaje = ejecutar_delete_ucmdb(url_principal, token)
             if exito:
                 exitosas += 1
-                logger.info(f"  ✓ {mensaje}")
+                logger.info(f"  ✓ Principal: {mensaje}")
             else:
                 fallidas += 1
-                logger.error(f"  ✗ {mensaje}")
+                logger.error(f"  ✗ Principal: {mensaje}")
+            total_deletes += 1
         else:
-            logger.info(f"  [SIMULACIÓN] Se eliminaría con DELETE {url}")
+            logger.info(f"  [SIMULACIÓN] DELETE principal: {url_principal}")
+            total_deletes += 1
+        
+        # SI relacion_fo es TRUE, TAMBIÉN eliminar el FO
+        if relacion_fo and ucmdbid_fo and ucmdbid_fo != "N/A":
+            url_fo = f"{UCMDB_DELETE_ENDPOINT}/{ucmdbid_fo}"
+            logger.debug(f"  URL FO: {url_fo}")
+            
+            if MODO_EJECUCION == "ejecucion":
+                exito, mensaje = ejecutar_delete_ucmdb(url_fo, token)
+                if exito:
+                    exitosas += 1
+                    logger.info(f"  ✓ FO: {mensaje}")
+                else:
+                    fallidas += 1
+                    logger.error(f"  ✗ FO: {mensaje}")
+                total_deletes += 1
+            else:
+                logger.info(f"  [SIMULACIÓN] DELETE FO: {url_fo}")
+                total_deletes += 1
     
     logger.info("-" * 80)
     logger.info("Resumen UCMDB:")
-    logger.info(f"  Total procesadas: {total}")
+    logger.info(f"  Total relaciones procesadas: {total}")
+    logger.info(f"  Total DELETE requests: {total_deletes}")
     
     if MODO_EJECUCION == "ejecucion":
-        logger.info(f"  Exitosas: {exitosas}")
-        logger.info(f"  Fallidas: {fallidas}")
+        logger.info(f"  DELETE exitosos: {exitosas}")
+        logger.info(f"  DELETE fallidos: {fallidas}")
     else:
-        logger.info(f"  Simuladas: {total}")
+        logger.info(f"  DELETE simulados: {total_deletes}")
 
 
 # ==================== FUNCIONES DE PROCESAMIENTO ====================
