@@ -1,36 +1,22 @@
 """
-Módulo de autenticación para UCMDB.
+Módulo de Autenticación para UCMDB.
 
 Gestiona la autenticación con la API REST de UCMDB y obtiene
 tokens JWT para peticiones subsecuentes.
 """
 
-import os
-import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Tuple
 
 import requests
 import urllib3
-from dotenv import load_dotenv
 
-# Configuración de logging
-logger = logging.getLogger(__name__)
+from .config import UCMDBConfig
+from .logger_config import obtener_logger
 
 # Desactivar advertencias SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Cargar variables de entorno
-load_dotenv()
-
-# Constantes
-AUTH_URL = "https://ucmdbapp.triara.co:8443/rest-api/authenticate"
-CLIENT_CONTEXT = 1
-REQUEST_TIMEOUT = 30  # segundos
-CONTENT_TYPE = "application/json"
-
-# Variables de entorno requeridas
-ENV_USERNAME = "UCMDB_USER"
-ENV_PASSWORD = "UCMDB_PASS"
+logger = obtener_logger(__name__)
 
 
 class AuthenticationError(Exception):
@@ -43,25 +29,28 @@ class ConfigurationError(Exception):
     pass
 
 
-def validar_credenciales() -> tuple[str, str]:
+def validar_credenciales(config: UCMDBConfig) -> Tuple[str, str]:
     """
-    Valida que las credenciales estén configuradas en variables de entorno.
+    Valida que las credenciales estén configuradas.
+
+    Args:
+        config: Configuración de UCMDB
 
     Returns:
-        tuple[str, str]: Usuario y contraseña obtenidos del .env
+        Tuple[str, str]: Usuario y contraseña
 
     Raises:
         ConfigurationError: Si las credenciales no están definidas.
     """
-    username = os.getenv(ENV_USERNAME)
-    password = os.getenv(ENV_PASSWORD)
+    username = config.USERNAME
+    password = config.PASSWORD
 
     credenciales_faltantes = []
     
     if not username:
-        credenciales_faltantes.append(ENV_USERNAME)
+        credenciales_faltantes.append("UCMDB_USER")
     if not password:
-        credenciales_faltantes.append(ENV_PASSWORD)
+        credenciales_faltantes.append("UCMDB_PASS")
     
     if credenciales_faltantes:
         mensaje = (
@@ -77,22 +66,24 @@ def validar_credenciales() -> tuple[str, str]:
 
 def construir_payload_autenticacion(
     username: str, 
-    password: str
-) -> Dict[str, Any]:
+    password: str,
+    config: UCMDBConfig
+) -> dict:
     """
     Construye el payload para la petición de autenticación.
 
     Args:
-        username (str): Nombre de usuario de UCMDB.
-        password (str): Contraseña de UCMDB.
+        username: Nombre de usuario de UCMDB
+        password: Contraseña de UCMDB
+        config: Configuración de UCMDB
 
     Returns:
-        Dict[str, Any]: Diccionario con los datos de autenticación.
+        Diccionario con los datos de autenticación
     """
     return {
         "username": username,
         "password": password,
-        "clientContext": CLIENT_CONTEXT
+        "clientContext": config.CLIENT_CONTEXT
     }
 
 
@@ -101,13 +92,13 @@ def extraer_token_de_respuesta(response: requests.Response) -> Optional[str]:
     Extrae el token JWT de la respuesta de autenticación.
 
     Args:
-        response (requests.Response): Respuesta HTTP de la petición de autenticación.
+        response: Respuesta HTTP de la petición de autenticación
 
     Returns:
-        Optional[str]: Token JWT si existe, None si no se encuentra.
+        Token JWT si existe, None si no se encuentra
 
     Raises:
-        AuthenticationError: Si la respuesta no contiene JSON válido.
+        AuthenticationError: Si la respuesta no contiene JSON válido
     """
     try:
         data = response.json()
@@ -128,32 +119,34 @@ def extraer_token_de_respuesta(response: requests.Response) -> Optional[str]:
 
 def autenticar_con_api(
     username: str, 
-    password: str
+    password: str,
+    config: UCMDBConfig
 ) -> requests.Response:
     """
     Realiza la petición de autenticación a la API de UCMDB.
 
     Args:
-        username (str): Nombre de usuario de UCMDB.
-        password (str): Contraseña de UCMDB.
+        username: Nombre de usuario de UCMDB
+        password: Contraseña de UCMDB
+        config: Configuración de UCMDB
 
     Returns:
-        requests.Response: Respuesta HTTP de la API.
+        requests.Response: Respuesta HTTP de la API
 
     Raises:
-        AuthenticationError: Si hay problemas de conexión o timeout.
+        AuthenticationError: Si hay problemas de conexión o timeout
     """
-    payload = construir_payload_autenticacion(username, password)
-    headers = {"Content-Type": CONTENT_TYPE}
+    payload = construir_payload_autenticacion(username, password, config)
+    headers = {"Content-Type": "application/json"}
 
     try:
-        logger.info(f"Autenticando con UCMDB en: {AUTH_URL}")
+        logger.info(f"Autenticando con UCMDB en: {config.AUTH_URL}")
         response = requests.post(
-            AUTH_URL,
+            config.AUTH_URL,
             json=payload,
             headers=headers,
             verify=False,
-            timeout=REQUEST_TIMEOUT
+            timeout=config.REQUEST_TIMEOUT
         )
         
         logger.debug(f"Respuesta recibida con código: {response.status_code}")
@@ -161,7 +154,7 @@ def autenticar_con_api(
         
     except requests.exceptions.Timeout:
         mensaje = (
-            f"Timeout al conectar con UCMDB después de {REQUEST_TIMEOUT} segundos"
+            f"Timeout al conectar con UCMDB después de {config.REQUEST_TIMEOUT} segundos"
         )
         logger.error(mensaje)
         raise AuthenticationError(mensaje)
@@ -177,16 +170,19 @@ def autenticar_con_api(
         raise AuthenticationError(mensaje)
 
 
-def obtener_token_ucmdb() -> Optional[str]:
+def obtener_token_ucmdb(config: Optional[UCMDBConfig] = None) -> Optional[str]:
     """
     Autentica contra la API de UCMDB y obtiene un token JWT.
 
     Este es el punto de entrada principal para la autenticación.
-    Valida las credenciales del archivo .env, realiza la autenticación
+    Valida las credenciales, realiza la autenticación
     y extrae el token JWT de la respuesta.
 
+    Args:
+        config: Configuración de UCMDB (usa instancia global si no se proporciona)
+
     Returns:
-        Optional[str]: Token JWT si la autenticación es exitosa, None si falla.
+        Token JWT si la autenticación es exitosa, None si falla
 
     Example:
         >>> token = obtener_token_ucmdb()
@@ -199,12 +195,16 @@ def obtener_token_ucmdb() -> Optional[str]:
         Esta función requiere que las variables UCMDB_USER y UCMDB_PASS
         estén definidas en el archivo .env del proyecto.
     """
+    if config is None:
+        from .config import ucmdb_config
+        config = ucmdb_config
+    
     try:
         # Paso 1: Validar credenciales
-        username, password = validar_credenciales()
+        username, password = validar_credenciales(config)
         
         # Paso 2: Autenticar con la API
-        response = autenticar_con_api(username, password)
+        response = autenticar_con_api(username, password, config)
         
         # Paso 3: Verificar código de respuesta
         if response.status_code == 200:
@@ -237,18 +237,25 @@ def obtener_token_ucmdb() -> Optional[str]:
         return None
 
 
-def verificar_configuracion() -> bool:
+def verificar_configuracion(config: Optional[UCMDBConfig] = None) -> bool:
     """
     Verifica que la configuración de autenticación sea válida.
 
     Útil para health checks o validaciones previas sin realizar
     una autenticación completa.
 
+    Args:
+        config: Configuración de UCMDB (usa instancia global si no se proporciona)
+
     Returns:
-        bool: True si la configuración es válida, False en caso contrario.
+        True si la configuración es válida, False en caso contrario
     """
+    if config is None:
+        from .config import ucmdb_config
+        config = ucmdb_config
+    
     try:
-        validar_credenciales()
+        validar_credenciales(config)
         logger.info("Configuración de autenticación válida")
         return True
     except ConfigurationError:

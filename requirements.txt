@@ -1,3 +1,16 @@
-requests
-python-dotenv
+# Core Dependencies
+requests>=2.28.1          # HTTP requests library
+python-dotenv>=0.20.0     # Environment variables from .env
+urllib3>=1.26.0           # HTTP client library (incluido en requests)
+
+# Security
+# Descomentar si se requiere validación SSL en producción
+# certifi>=2021.10.8
+
+# Development (opcional)
+# pytest>=7.2.0
+# pytest-cov>=4.0.0
+# black>=22.12.0
+# flake8>=4.0.1
+# mypy>=0.990
 ``
