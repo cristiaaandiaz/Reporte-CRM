@@ -149,17 +149,27 @@ def eliminar_en_ucmdb(
         ucmdbid = item.get("ucmdbId", "").strip()
         ucmdbid_fo = item.get("ucmdbid_fo", "N/A")
         relacion_fo = item.get("relacion_fo", False)
+        nit_end1 = item.get("nit_end1", "N/A")
+        nit_end2 = item.get("nit_end2", "N/A")
+        end1id = item.get("end1Id", "N/A")
+        end2id = item.get("end2Id", "N/A")
+        label_end1 = item.get("display_label_end1", "N/A")
+        label_end2 = item.get("display_label_end2", "N/A")
         
         if not ucmdbid:
             logger.warning(f"[{idx}/{total}] ucmdbId vacío, saltando")
             continue
         
+        # Mostrar resumen en formato legible
+        logger.info(f"[{idx}/{total}] DELETE - Relación: {ucmdbid}")
+        logger.info(f"  FO: {relacion_fo} ({ucmdbid_fo}) | NIT: {nit_end1} ≠ {nit_end2}")
+        logger.info(f"  End1: {label_end1} ({end1id})")
+        logger.info(f"  End2: {label_end2} ({end2id})")
+        
         # Lista de IDs a eliminar
         ids_a_eliminar = [ucmdbid]
         if relacion_fo and ucmdbid_fo != "N/A":
             ids_a_eliminar.append(ucmdbid_fo)
-        
-        logger.info(f"[{idx}/{total}] Procesando: {ucmdbid}")
         
         for ucmdb_id in ids_a_eliminar:
             total_deletes += 1
@@ -182,13 +192,15 @@ def eliminar_en_ucmdb(
                 
                 if exito:
                     exitosas += 1
-                    logger.info(f"  ✓ DELETE {ucmdb_id}: {mensaje}")
+                    logger.info(f"  ✓ HTTP 204 OK - {ucmdb_id}")
                 else:
                     fallidas += 1
-                    logger.error(f"  ✗ DELETE {ucmdb_id}: {mensaje}")
+                    logger.error(f"  ✗ ERROR - {ucmdb_id}: {mensaje}")
             else:
                 resultado["estado"] = "SIMULADA"
-                logger.info(f"  [SIM] DELETE sería ejecutado: {url}")
+                logger.info(f"  [SIM] DELETE {url}")
+                if relacion_fo and ucmdbid_fo != "N/A" and ucmdb_id == ucmdbid_fo:
+                    logger.info(f"       + Relación FO también se eliminaría: {ucmdbid}")
             
             resumen.append(resultado)
     

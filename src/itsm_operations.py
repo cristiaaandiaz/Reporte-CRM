@@ -184,17 +184,25 @@ def eliminar_en_itsm(
     for idx, item in enumerate(relaciones_validas, 1):
         ucmdbid = item.get("ucmdbId", "").strip()
         ucmdbid_fo = item.get("ucmdbid_fo", "").strip()
+        nit_end1 = item.get("nit_end1", "N/A")
+        nit_end2 = item.get("nit_end2", "N/A")
+        end1id = item.get("end1Id", "N/A")
+        end2id = item.get("end2Id", "N/A")
+        label_end1 = item.get("display_label_end1", "N/A")
+        label_end2 = item.get("display_label_end2", "N/A")
         
         if not ucmdbid or not ucmdbid_fo:
             logger.warning(f"[{idx}/{total}] IDs vacíos, saltando")
             continue
         
+        # Mostrar resumen en formato legible
+        logger.info(f"[{idx}/{total}] PUT - Relación: {ucmdbid}")
+        logger.info(f"  FO: True ({ucmdbid_fo}) | NIT: {nit_end1} ≠ {nit_end2}")
+        logger.info(f"  End1: {label_end1} ({end1id})")
+        logger.info(f"  End2: {label_end2} ({end2id})")
+        
         # Construcción de URL según spec: /SM/9/rest/cirelationship1to1s/{UcmdbID_fo}/{UcmdbID}
         url = f"{config.BASE_URL}/cirelationship1to1s/{ucmdbid_fo}/{ucmdbid}"
-        
-        logger.info(f"[{idx}/{total}] Procesando: {ucmdbid}")
-        logger.debug(f"  ucmdbid_fo: {ucmdbid_fo}")
-        logger.debug(f"  URL: {url}")
         
         resultado = {
             "numero": idx,
@@ -215,13 +223,13 @@ def eliminar_en_itsm(
             
             if exito:
                 exitosas += 1
-                logger.info(f"  ✓ PUT {ucmdbid}: {mensaje}")
+                logger.info(f"  ✓ HTTP 200 OK - status: Removed")
             else:
                 fallidas += 1
-                logger.error(f"  ✗ PUT {ucmdbid}: {mensaje}")
+                logger.error(f"  ✗ ERROR - {mensaje}")
         else:
             resultado["estado"] = "SIMULADA"
-            logger.info(f"  [SIM] PUT sería ejecutado en ITSM: {url}")
+            logger.info(f"  [SIM] PUT {url}")
         
         resumen.append(resultado)
     
