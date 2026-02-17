@@ -114,12 +114,29 @@ class UCMDBConfig:
             )
 
 
+# ==================== POLÍTICA DE VERIFICACIÓN SSL ====================
+# Controla verificación de certificados SSL/TLS en TODAS las llamadas HTTP
+# En desarrollo/testing: False (útil para certificados auto-firmados)
+# En producción: True (OBLIGATORIO por seguridad)
+VERIFY_SSL = os.getenv("VERIFY_SSL", "False").lower() == "true"
+
+if not VERIFY_SSL:
+    import warnings
+    warnings.warn(
+        "⚠️  ADVERTENCIA DE SEGURIDAD: Verificación SSL DESHABILITADA\n"
+        "   Esto solo es seguro en entornos de desarrollo interno.\n"
+        "   En producción, establezca VERIFY_SSL=True en .env",
+        category=Warning,
+        stacklevel=2
+    )
+
+
 # ==================== CONFIGURACIÓN ITSM ====================
 @dataclass
 class ITSMConfig:
     """Configuración para conexión con ITSM."""
     
-    # URLs base
+    # URLs base (verificar .env tiene ITSM_URL, NO ITSM_BASE_URL)
     BASE_URL: str = os.getenv("ITSM_URL", "")
     
     # Credenciales
@@ -131,7 +148,8 @@ class ITSMConfig:
     MAX_RETRIES: int = 3
     RETRY_DELAY: int = 2
     
-    # Endpoint relativo
+    # Endpoint relativo - usado para construir URLs completas
+    # Patrón: /SM/9/rest/cirelationship1to1s/{ucmdbid_fo}/{ucmdbid}
     ENDPOINT_PATTERN: str = "/cirelationship1to1s/{ucmdbid_fo}/{ucmdbid}"
     
     def validar(self):

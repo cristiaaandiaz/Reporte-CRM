@@ -6,5 +6,5 @@ de NITs entre sistemas UCMDB e ITSM.
 """
 
 __version__ = "1.0.0"
-__author__ = "Equipo de Integración"
+__author__ = "Equipo de Automatizacion"
 __description__ = "Validación de consistencia de NITs en UCMDB e ITSM"

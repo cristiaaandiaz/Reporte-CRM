@@ -6,11 +6,12 @@ Gestiona las operaciones de eliminación (DELETE) en UCMDB.
 
 from typing import List, Dict, Any, Tuple, Optional
 import base64
+import time
 
 import requests
 import urllib3
 
-from .config import UCMDBConfig
+from .config import UCMDBConfig, VERIFY_SSL
 from .logger_config import obtener_logger
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -51,7 +52,7 @@ def ejecutar_delete_ucmdb(
             response = requests.delete(
                 url,
                 headers=headers,
-                verify=False,
+                verify=VERIFY_SSL,
                 timeout=config.REQUEST_TIMEOUT
             )
             
@@ -65,7 +66,9 @@ def ejecutar_delete_ucmdb(
             
             elif response.status_code in [500, 502, 503, 504]:
                 if intento < max_reintentos:
-                    logger.warning(f"Error servidor ({response.status_code}), reintentando...")
+                    espera = delay_reintento * (2 ** (intento - 1))  # Backoff exponencial
+                    logger.warning(f"Error servidor ({response.status_code}), reintentando en {espera}s (intento {intento}/{max_reintentos})")
+                    time.sleep(espera)
                     continue
                 return False, f"Error servidor después de {max_reintentos} intentos ({response.status_code})"
             
@@ -75,12 +78,20 @@ def ejecutar_delete_ucmdb(
         
         except requests.exceptions.Timeout:
             logger.warning(f"Timeout en DELETE (intento {intento}/{max_reintentos})")
+            if intento < max_reintentos:
+                espera = delay_reintento * (2 ** (intento - 1))
+                logger.warning(f"Esperando {espera}s antes de reintentar...")
+                time.sleep(espera)
             if intento == max_reintentos:
                 return False, "Timeout agotado"
             continue
         
         except requests.exceptions.ConnectionError as e:
             logger.warning(f"Error conexión (intento {intento}/{max_reintentos}): {e}")
+            if intento < max_reintentos:
+                espera = delay_reintento * (2 ** (intento - 1))
+                logger.warning(f"Esperando {espera}s antes de reintentar...")
+                time.sleep(espera)
             if intento == max_reintentos:
                 return False, f"Error de conexión: {str(e)}"
             continue

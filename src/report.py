@@ -16,7 +16,7 @@ import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry as Urllib3Retry
 
-from .config import UCMDBConfig, ReportConfig
+from .config import UCMDBConfig, ReportConfig, VERIFY_SSL
 from .logger_config import obtener_logger
 
 # Desactivar advertencias SSL
@@ -116,7 +116,7 @@ def consultar_reporte_ucmdb(
                 config.BASE_URL,
                 data=ReportConfig.REPORT_NAME,
                 headers=headers,
-                verify=False,
+                verify=VERIFY_SSL,
                 timeout=timeouts,
                 stream=True
             )
@@ -191,12 +191,22 @@ def consultar_reporte_ucmdb(
                                 raise ValueError("JSON truncado sin estructura mínima")
                             
                             cierres_necesarios = (']' * (open_brackets - close_brackets)) + ('}' * (open_braces - close_braces))
+                            
+                            # ⚠️ VALIDACIÓN: Solo cerrar si estructura es semánticamente recuperable
+                            # Rechazar si falta más del 5% de estructura
+                            total_caracteres = len(contenido_str)
+                            if cierres_necesarios and len(cierres_necesarios) > total_caracteres * 0.05:
+                                logger.critical(f"❌ JSON CORRUPTO: Necesita cerrar {len(cierres_necesarios)} caracteres (>{total_caracteres*0.05:.0f} del total)")
+                                logger.critical("   Riesgo: Estructura semánticamente irrecuperable")
+                                raise ValueError("JSON truncado con pérdida estructural >5%")
+                            
                             if cierres_necesarios:
                                 contenido_str += cierres_necesarios
-                                logger.info(f"Agregados {len(cierres_necesarios)} caracteres de cierre")
+                                logger.warning(f"⚠️  JSON cerrado artificialmente: +{len(cierres_necesarios)} caracteres")
+                                logger.warning("   Validar datos antes de procesar (posible corrupción semántica)")
                             
                             contenido = contenido_str.encode('utf-8')
-                            logger.info("JSON truncado recuperado y cerrado correctamente")
+                            logger.info("JSON truncado recuperado y cerrado (con validación de seguridad)")
                         except Exception as fix_error:
                             logger.error(f"Error al recuperar JSON truncado: {type(fix_error).__name__}: {fix_error}")
                             logger.warning("El JSON truncado no puede ser procesado de forma segura")
@@ -224,7 +234,7 @@ def consultar_reporte_ucmdb(
                             config.BASE_URL,
                             json=alt_payload,
                             headers=alt_headers,
-                            verify=False,
+                            verify=VERIFY_SSL,
                             timeout=timeouts,
                         )
                         logger.error(f"Alternativa: status {alt_resp.status_code}")

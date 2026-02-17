@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import requests
 import urllib3
 
-from .config import UCMDBConfig
+from .config import UCMDBConfig, VERIFY_SSL
 from .logger_config import obtener_logger
 
 # Desactivar advertencias SSL
@@ -145,7 +145,7 @@ def autenticar_con_api(
             config.AUTH_URL,
             json=payload,
             headers=headers,
-            verify=False,
+            verify=VERIFY_SSL,
             timeout=config.REQUEST_TIMEOUT
         )
         

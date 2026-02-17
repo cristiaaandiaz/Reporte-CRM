@@ -7,11 +7,12 @@ relaciones como 'Removed'.
 
 from typing import List, Dict, Any, Tuple, Optional
 import base64
+import time
 
 import requests
 import urllib3
 
-from .config import ITSMConfig
+from .config import ITSMConfig, VERIFY_SSL
 from .logger_config import obtener_logger
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -82,7 +83,7 @@ def ejecutar_update_itsm(
                 url,
                 json=payload,
                 headers=headers,
-                verify=False,
+                verify=VERIFY_SSL,
                 timeout=config.TIMEOUT
             )
             
@@ -96,7 +97,9 @@ def ejecutar_update_itsm(
             
             elif response.status_code in [500, 502, 503, 504]:
                 if intento < max_reintentos:
-                    logger.warning(f"Error servidor ITSM ({response.status_code}), reintentando...")
+                    espera = delay_reintento * (2 ** (intento - 1))  # Backoff exponencial
+                    logger.warning(f"Error servidor ITSM ({response.status_code}), reintentando en {espera}s (intento {intento}/{max_reintentos})")
+                    time.sleep(espera)
                     continue
                 return False, f"Error servidor ITSM después de {max_reintentos} intentos ({response.status_code})"
             
@@ -106,12 +109,20 @@ def ejecutar_update_itsm(
         
         except requests.exceptions.Timeout:
             logger.warning(f"Timeout en PUT ITSM (intento {intento}/{max_reintentos})")
+            if intento < max_reintentos:
+                espera = delay_reintento * (2 ** (intento - 1))
+                logger.warning(f"Esperando {espera}s antes de reintentar...")
+                time.sleep(espera)
             if intento == max_reintentos:
                 return False, "Timeout en ITSM agotado"
             continue
         
         except requests.exceptions.ConnectionError as e:
             logger.warning(f"Error conexión ITSM (intento {intento}/{max_reintentos}): {e}")
+            if intento < max_reintentos:
+                espera = delay_reintento * (2 ** (intento - 1))
+                logger.warning(f"Esperando {espera}s antes de reintentar...")
+                time.sleep(espera)
             if intento == max_reintentos:
                 return False, f"Error de conexión ITSM: {str(e)}"
             continue
@@ -152,11 +163,11 @@ def eliminar_en_itsm(
     logger.info("=" * 80)
     
     if not config.BASE_URL:
-        logger.error("ERROR CRÍTICO: ITSM_BASE_URL no está configurada en .env")
-        logger.error("  Requerida: ITSM_BASE_URL (ej: https://servidor:puerto/SM/9/rest)")
+        logger.error("ERROR CRÍTICO: ITSM_URL no está configurada en .env")
+        logger.error("  Requerida: ITSM_URL (ej: https://servidor:puerto/SM/9/rest)")
         return None
     
-    logger.info(f"ITSM_BASE_URL configurada: {config.BASE_URL}")
+    logger.info(f"ITSM_URL configurada: {config.BASE_URL}")
     
     if modo_ejecucion == "ejecucion":
         logger.warning("[EJECUCIÓN] Se marcarán relaciones como 'Removed' en ITSM")
@@ -223,7 +234,7 @@ def eliminar_en_itsm(
             
             if exito:
                 exitosas += 1
-                logger.info(f"  ✓ HTTP 200 OK - status: Removed")
+                logger.info("  ✓ HTTP 200 OK - status: Removed")
             else:
                 fallidas += 1
                 logger.error(f"  ✗ ERROR - {mensaje}")
