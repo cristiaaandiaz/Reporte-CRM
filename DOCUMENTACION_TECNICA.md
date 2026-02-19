@@ -300,21 +300,40 @@ Para cada inconsistencia:
 
 | Función | Entrada | Salida |
 |---------|---------|--------|
+| `consultar_parent_ci_en_itsm()` | `end2_id, config` | `(Optional[str], str)` |
 | `ejecutar_update_itsm()` | `url, config` | `(bool, str)` |
-| `eliminar_en_itsm()` | `inconsistencias, modo` | `dict` |
+| `eliminar_en_itsm()` | `inconsistencias, carpeta, modo` | `None` |
 
-#### Estrategia PUT:
+#### Estrategia PUT (Flujo en Dos Pasos):
 
 ```
-Para cada inconsistencia:
-├── Construye payload JSON {"state": "Removed"}
-├── Modo SIMULACION:
-│   └── Registra acción, no ejecuta
-└── Modo EJECUCION:
-    ├── Ejecuta PUT con Basic Auth
-    ├── Reintentos automáticos (max 3)
-    ├── Registra resultado
-    └── Continúa si falla
+Para cada inconsistencia con FO válido:
+
+PASO 1: OBTENER ParentCI
+├── GET /rest/Relationships?query=ChildCIs="<end2Id>"&view=expand
+├── Parsear respuesta
+└── Extraer ParentCI
+
+PASO 2: MARCAR COMO REMOVED
+├── Construir URL: /cirelationship1to1s/{ParentCI}/{end2Id}
+├── PUT con Body: {"cirelationship1to1": {"status": "Removed"}}
+└── Reintentos automáticos (max 3) si error servidor
+```
+
+#### Flujo en Modo SIMULACION vs EJECUCION:
+
+```
+SIMULACION:
+├── Consulta GET ParentCI (sí, para validar disponibilidad)
+├── Muestra URL que se ejecutaría
+└── No ejecuta PUT
+
+EJECUCION:
+├── Consulta GET ParentCI
+├── Si obtiene ParentCI:
+│   └── Ejecuta PUT con reintentos
+└── Si falla GET:
+    └── Marca como FALLIDA
 ```
 
 #### Autenticación ITSM:
@@ -323,6 +342,7 @@ Para cada inconsistencia:
 # Basic Auth: username:password codificado en Base64
 Authorization: Basic base64(username:password)
 Content-Type: application/json
+Accept: application/json
 ```
 
 ---

@@ -27,17 +27,30 @@ def ejecutar_delete_ucmdb(
     delay_reintento: int = 2
 ) -> Tuple[bool, str]:
     """
-    Ejecuta DELETE en UCMDB con reintentos automáticos.
+    Ejecuta DELETE en UCMDB con reintentos automáticos y backoff exponencial.
+    
+    Algoritmo de eliminación:
+    1. Prepara headers con Bearer token JWT
+    2. Realiza DELETE a la URL especificada
+    3. Valida respuesta:
+       - 200/204: Eliminación exitosa, retorna (True, "Eliminada")
+       - 404: Relación no existe, retorna (False, "No encontrada")
+       - 5xx: Error servidor, reintentos con backoff exponencial
+       - Timeout/ConnectionError: Reintentos automáticos
+    4. Backoff: espera delay_reintento * 2^(intento-1) segundos
+    5. Logging completo de intentos y resultados
     
     Args:
         url: URL completa del endpoint DELETE en UCMDB
-        token: Token JWT para autenticación
-        config: Configuración de UCMDB
-        max_reintentos: Máximo número de reintentos
-        delay_reintento: Segundos de espera entre reintentos
+        token: Token JWT para autenticación (Bearer token)
+        config: Configuración de UCMDB (si None, usa ucmdb_config global)
+        max_reintentos: Máximo número de reintentos (default: 3)
+        delay_reintento: Segundos base de espera entre reintentos (default: 2)
         
     Returns:
-        Tupla (Éxito, Mensaje descriptivo)
+        Tupla (Éxito: bool, Mensaje descriptivo: str)
+        Ej: (True, "Eliminada en UCMDB")
+            (False, "Relación no encontrada en UCMDB")
     """
     if config is None:
         from .config import ucmdb_config

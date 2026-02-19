@@ -313,57 +313,78 @@ graph TD
 
 ```mermaid
 graph TD
-    START["🔄 eliminar_en_itsm()"] --> INIT["Inicializar: relaciones_procesadas = {}"]
+    START["🔄 eliminar_en_itsm()"] --> CHECK_MODE{¿Validación?}
     
-    INIT --> CHECK_MODE{¿Simulación?}
+    CHECK_MODE -->|Sí - Simulación| LOG_SIM["📝 Log: Mostrar URLs sin ejecutar"]
+    CHECK_MODE -->|No - Ejecución| LOG_EXEC["⚠️ Log: CAMBIOS REALES en ITSM"]
     
-    CHECK_MODE -->|Sí| LOG_SIM["📝 Registrar actualizaciones sin ejecutar"]
-    LOG_SIM --> RET_SIM["Retornar dict vacío (sin cambios)"]
+    LOG_SIM --> LOOP["for inconsistencia in lista:"]
+    LOG_EXEC --> LOOP
     
-    CHECK_MODE -->|No| LOOP["for inconsistencia in lista:"]
+    LOOP --> EXTRACT["end2Id = inconsistencia['end2Id']"]
+    EXTRACT --> PASO1_TITLE["═══ PASO 1: GET ParentCI ═══"]
     
-    LOOP --> EXTRACT["relation_id = inconsistencia['relation_id']"]
-    EXTRACT --> BUILD_URL["Construir URL PUT"]
-    BUILD_URL --> URL["ITSM_URL/relaciones/{relation_id}"]
+    PASO1_TITLE --> QUERY_BUILD["Construir query: ChildCIs={end2Id}"]
+    QUERY_BUILD --> GET_URL["GET /rest/Relationships?query=...&view=expand"]
     
-    URL --> PAYLOAD["Crear payload: {\"state\": \"Removed\"}"]
-    PAYLOAD --> HEADERS["Preparar headers:"]
-    HEADERS --> AUTH["  Authorization: Basic {username:password en base64}"]
-    AUTH --> CONTENT["  Content-Type: application/json"]
+    GET_URL --> FOR_RETRY1["for intento in range(1, max_reintentos+1):"]
     
-    CONTENT --> UPDATE_CALL["ejecutar_update_itsm()"]
+    FOR_RETRY1 --> REQ_GET["requests.get(url, headers, auth)"]
     
-    UPDATE_CALL --> FOR_RETRY["for intento in range(1, max_reintentos+1):"]
+    REQ_GET -->|ConnectionError| RETRY_GET["⏳ Esperar 2s"]
+    RETRY_GET --> FOR_RETRY1
     
-    FOR_RETRY --> REQ_PUT["requests.put(url, json=payload, headers, auth)"]
+    REQ_GET -->|Timeout| RETRY_GET
     
-    REQ_PUT -->|ConnectionError| RETRY_DELAY["⏳ Esperar 2s"]
-    RETRY_DELAY --> FOR_RETRY
+    REQ_GET -->|HTTP 200| PARSE["Parsear JSON response"]
+    PARSE --> EXTRACT_PC["parent_ci = response['content'][0]['Relationship']['ParentCI']"]
+    EXTRACT_PC --> LOG_PC["✅ ParentCI obtenido: {parent_ci}"]
     
-    REQ_PUT -->|Timeout| RETRY_DELAY
+    REQ_GET -->|HTTP 404| LOG_NOT_FOUND["⚠️ Relación no encontrada"]
+    REQ_GET -->|HTTP 500/502/503| LOG_SERVER_ERR["❌ Error servidor"]
+    LOG_NOT_FOUND --> REC_FAIL["Registrar como FALLIDA"]
+    LOG_SERVER_ERR --> RETRY_GET
     
-    REQ_PUT -->|HTTP 200/201| LOG_OK["✅ PUT exitoso"]
-    REQ_PUT -->|HTTP 404| LOG_NOT_FOUND["⚠️ Relación no existe en ITSM"]
-    REQ_PUT -->|HTTP 401| LOG_UNAUTH["⚠️ Autenticación fallida"]
-    REQ_PUT -->|HTTP 400| LOG_BADREQ["⚠️ Payload inválido"]
-    REQ_PUT -->|HTTP 500| LOG_ERROR["❌ Error servidor"]
+    LOG_PC --> PASO2_TITLE["═══ PASO 2: PUT Removed ═══"]
     
-    LOG_OK --> RECORD_OK["Registrar: {estado: 'exito', status: 200}"]
-    LOG_NOT_FOUND --> RECORD_4["Registrar: {estado: 'fallo', status: 404}"]
-    LOG_UNAUTH --> RECORD_U["Registrar: {estado: 'fallo', status: 401}"]
-    LOG_BADREQ --> RECORD_B["Registrar: {estado: 'fallo', status: 400}"]
-    LOG_ERROR --> RETRY_DELAY
+    PASO2_TITLE --> BUILD_URL["Construir URL DELETE"]
+    BUILD_URL --> URL_FINAL["PUT /cirelationship1to1s/{parent_ci}/{end2Id}"]
     
-    RECORD_OK --> NEXT_REL{¿Más relaciones?}
-    RECORD_4 --> NEXT_REL
-    RECORD_U --> NEXT_REL
-    RECORD_B --> NEXT_REL
+    URL_FINAL --> PAYLOAD["Crear BODY: {\"status\": \"Removed\"}"]
+    PAYLOAD --> CHECK_EXECUTE{¿Modo?}
+    
+    CHECK_EXECUTE -->|Simulación| LOG_URL["Log [SIM] URL"]
+    CHECK_EXECUTE -->|Ejecución| FOR_RETRY2["for intento in range(1, max_reintentos+1):"]
+    
+    LOG_URL --> RECORD_SIM["Registrar como SIMULADA"]
+    
+    FOR_RETRY2 --> REQ_PUT["requests.put(url, json=payload, headers, auth)"]
+    
+    REQ_PUT -->|ConnectionError| RETRY_PUT["⏳ Esperar 2s"]
+    RETRY_PUT --> FOR_RETRY2
+    
+    REQ_PUT -->|Timeout| RETRY_PUT
+    
+    REQ_PUT -->|HTTP 200| LOG_OK["✅ PUT exitoso (200/204)"]
+    LOG_OK --> RECORD_OK["Registrar: EXITOSA"]
+    
+    REQ_PUT -->|HTTP 404| LOG_404["⚠️ Relación no existe"]
+    LOG_404 --> RECORD_FAIL["Registrar: FALLIDA (404)"]
+    
+    REQ_PUT -->|HTTP 500| LOG_SRV["❌ Error servidor"]
+    LOG_SRV --> RETRY_PUT
+    
+    RECORD_SIM --> NEXT_REL{¿Más?}
+    RECORD_OK --> NEXT_REL
+    REC_FAIL --> NEXT_REL
+    RECORD_FAIL --> NEXT_REL
     
     NEXT_REL -->|Sí| LOOP
-    NEXT_REL -->|No| RETURN["Retornar: relaciones_procesadas"]
+    NEXT_REL -->|No| RETURN["Retornar: resumen"]
     
-    RETURN --> LOG_SUMMARY["📊 Resumen: X actualizadas, Y fallidas"]
-    LOG_SUMMARY --> END["Fin operación ITSM"]
+    RETURN --> LOG_SUMMARY["📊 Resumen: X exitosas, Y fallidas"]
+    LOG_SUMMARY --> SAVE_SUMMARY["Guardar: resumen_itsm.txt"]
+    SAVE_SUMMARY --> END["✅ Fin operación ITSM"]
 ```
 
 ---

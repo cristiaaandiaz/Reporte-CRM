@@ -81,7 +81,6 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     relations = json_data.get("relations", [])
     cis = json_data.get("cis", [])
     
-    relations_by_id = {rel["ucmdbId"]: rel for rel in relations if rel.get("ucmdbId")}
     containment_by_end2 = {
         rel["end2Id"]: rel
         for rel in relations if rel.get("type") == "containment" and rel.get("end2Id")
@@ -98,9 +97,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     
     relaciones_enriquecidas_particulares = enriquecer_inconsistencias_particulares(
         inconsistencias_particulares,
-        relations,
-        containment_by_end2,
-        cis_by_id
+        containment_by_end2
     )
     
     # Guardar reportes

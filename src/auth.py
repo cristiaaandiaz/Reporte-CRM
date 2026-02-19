@@ -173,6 +173,17 @@ def autenticar_con_api(
 def obtener_token_ucmdb(config: Optional[UCMDBConfig] = None) -> Optional[str]:
     """
     Autentica contra la API de UCMDB y obtiene un token JWT.
+    
+    Algoritmo de autenticación en cascada:
+    1. Valida credenciales (no vacías, correctas en .env)
+    2. Realiza HTTP POST a /api/login con username:password en Base64
+    3. Verifica respuesta:
+       - Status 200: Extrae token del campo 'token' en JSON
+       - Status 401: Credenciales inválidas
+       - Status 5xx: Error servidor (sin reintentos)
+       - Otros: Error desconocido
+    4. Retorna token JWT si exitoso, None si falla
+    5. Logging detallado de cada paso del proceso
 
     Este es el punto de entrada principal para la autenticación.
     Valida las credenciales, realiza la autenticación
@@ -182,18 +193,20 @@ def obtener_token_ucmdb(config: Optional[UCMDBConfig] = None) -> Optional[str]:
         config: Configuración de UCMDB (usa instancia global si no se proporciona)
 
     Returns:
-        Token JWT si la autenticación es exitosa, None si falla
+        Token JWT (string) si la autenticación es exitosa, None si falla
+        Ej: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 
     Example:
         >>> token = obtener_token_ucmdb()
         >>> if token:
-        ...     print("Autenticación exitosa")
+        ...     print(f"✓ Autenticación exitosa, token: {token[:20]}...")
         ... else:
-        ...     print("Falló la autenticación")
+        ...     print("✗ Autenticación fallida")
     
     Note:
         Esta función requiere que las variables UCMDB_USER y UCMDB_PASS
         estén definidas en el archivo .env del proyecto.
+        El token expira después de un tiempo determinado por UCMDB.
     """
     if config is None:
         from .config import ucmdb_config

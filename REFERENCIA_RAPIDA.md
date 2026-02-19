@@ -113,7 +113,57 @@ python run.py
 
 ---
 
-## 🆘 Comandos Útiles para Debugging
+## 🔄 Flujo ITSM: Obtener ParentCI y Marcar Removed
+
+### ¿Por qué dos pasos?
+
+ITSM requiere el `ParentCI` (aplicación/servicio) para marcar relaciones como "Removed". 
+El script primero consulta el ParentCI y luego ejecuta la eliminación.
+
+### Paso 1: GET ParentCI
+
+```http
+GET /SM/9/rest/Relationships?query=ChildCIs="<end2Id>"&view=expand
+```
+
+**Respuesta típica:**
+```json
+{
+  "content": [{
+    "Relationship": {
+      "ParentCI": "Empresas – Intranet_901999048-9",
+      "RelationshipType": "Containment"
+    }
+  }]
+}
+```
+
+### Paso 2: PUT Marcar Removed
+
+```http
+PUT /SM/9/rest/cirelationship1to1s/{ParentCI}/{end2Id}
+
+{
+  "cirelationship1to1": {
+    "status": "Removed"
+  }
+}
+```
+
+### En los Logs
+
+```
+[1/145] Procesando relación: 496c7e40973e112d8a374bb29fa5ed75
+  NIT: 901999048-9 ≠ 860512780-4
+  End1: UNION TEMPORAL SITEC_901999048-9_13992759 (...)
+  End2: AABIXG0070 (4a2713dcf16b910c9ec1a760edcd901f)
+  
+  → Paso 1: GET Relationship para obtener ParentCI...
+  ✓ ParentCI obtenido: Empresas – Intranet_901999048-9
+  [SIM] PUT http://172.22.108.160:13090/SM/9/rest/cirelationship1to1s/Empresas – Intranet_901999048-9/4a2713dcf16b910c9ec1a760edcd901f
+```
+
+---
 
 ### Ver logs en tiempo real
 ```bash
