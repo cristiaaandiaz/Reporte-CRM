@@ -42,7 +42,7 @@ class ExecutionFlags:
     # Modo de ejecución para AMBAS APIs (UCMDB + ITSM)
     # "simulacion" => DRY-RUN (recomendado primero)
     # "ejecucion" => Eliminaciones REALES en producción
-    MODO_EJECUCION = "simulacion"
+    MODO_EJECUCION = "ejecucion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
     
     # True = Usar JSON local para pruebas (no llama API UCMDB)
     # False = Traer reporte de la API UCMDB (producción)

@@ -12,6 +12,7 @@ Flujo:
 """
 
 from typing import List, Dict, Any, Tuple, Optional
+from urllib.parse import quote
 import base64
 import time
 
@@ -71,8 +72,9 @@ def consultar_parent_ci_en_itsm(
     
     headers = _crear_headers_itsm(config)
     
-    # Construir URL de consulta
-    query = f'ChildCIs="{end2_id}"'
+    # Construir URL de consulta (con URL encoding para caracteres especiales)
+    end2_id_encoded = quote(str(end2_id), safe='')
+    query = f'ChildCIs="{end2_id_encoded}"'
     url = f"{config.BASE_URL}/Relationships?query={query}&view=expand"
     
     for intento in range(1, max_reintentos + 1):
@@ -372,7 +374,7 @@ def eliminar_en_itsm(
             "ucmdbId": ucmdbid,
             "end2Id": end2id,
             "parentCI": None,
-            "url_query": f"{config.BASE_URL}/Relationships?query=ChildCIs=\"{end2id}\"&view=expand",
+            "url_query": f"{config.BASE_URL}/Relationships?query=ChildCIs=\"{quote(str(end2id), safe='')}\"&view=expand",
             "url_delete": None,
             "metodo": "GET + PUT",
             "modo": "EJECUCION" if modo_ejecucion == "ejecucion" else "SIMULACION",
@@ -395,8 +397,11 @@ def eliminar_en_itsm(
         resultado["parentCI"] = parent_ci
         logger.info(f"  ✓ ParentCI obtenido: {parent_ci}")
         
-        # PASO 2: Construir URL de eliminación con ParentCI
-        delete_url = f"{config.BASE_URL}/cirelationship1to1s/{parent_ci}/{end2id}"
+        # PASO 2: Construir URL de eliminación con ParentCI (con URL encoding)
+        # ParentCI puede tener espacios y caracteres especiales, necesita encoding
+        parent_ci_encoded = quote(str(parent_ci), safe='')
+        end2id_encoded = quote(str(end2id), safe='')
+        delete_url = f"{config.BASE_URL}/cirelationship1to1s/{parent_ci_encoded}/{end2id_encoded}"
         resultado["url_delete"] = delete_url
         
         if modo_ejecucion == "ejecucion":
