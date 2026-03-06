@@ -429,3 +429,69 @@ def validar_integridad_json(json_data: Dict[str, Any]) -> bool:
     logger.info(f"✅ Validación exitosa: {len(cis):,} CIs, {len(relations):,} relaciones")
     logger.info("=" * 60)
     return True
+
+
+def guardar_relaciones_usage_detalle(
+    relaciones_usage: List[Dict[str, Any]],
+    carpeta: Path,
+    nombre_archivo: str = "relaciones_usage_de_servicecodes.txt"
+) -> Optional[Path]:
+    """
+    Guarda detalle de relaciones usage de servicecodes a eliminar en formato texto.
+    
+    Genera un archivo con una relacion por entrada, mostrando:
+    - ID de relacion usage
+    - Datos de la aplicacion (end1Id, tipo, etiqueta)
+    - Datos del servicecode (end2Id, tipo, etiqueta)
+    
+    Args:
+        relaciones_usage: Lista de relaciones usage a eliminar
+        carpeta: Carpeta destino (si es 'disabled', omite guardado)
+        nombre_archivo: Nombre del archivo output
+    
+    Returns:
+        Ruta del archivo guardado o None si esta vacia/deshabilitada
+    """
+    if not relaciones_usage:
+        logger.debug(f"Sin relaciones usage para guardar en {nombre_archivo}")
+        return None
+
+    if carpeta.name == "disabled":
+        logger.debug(f"Guardado de {nombre_archivo} deshabilitado")
+        return None
+
+    archivo = carpeta / nombre_archivo
+
+    try:
+        with open(archivo, "w", encoding="utf-8") as f:
+            f.write(SEPARADOR_REPORTE + "\n")
+            f.write(f"{nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')}\n")
+            f.write(SEPARADOR_REPORTE + "\n\n")
+            
+            for idx, item in enumerate(relaciones_usage, 1):
+                relation_id = item.get("ucmdbId", "N/A")
+                end1_id = item.get("end1Id", "N/A")
+                end2_id = item.get("end2Id", "N/A")
+                end1_label = item.get("display_label_end1", "N/A")
+                end2_label = item.get("display_label_end2", "N/A")
+                end1_type = item.get("ci_type_end1", "N/A")
+                end2_type = item.get("ci_type_end2", "N/A")
+                rel_type = item.get("type", "N/A")
+                
+                f.write(f"[{idx}] ID Relacion: {relation_id}\n")
+                f.write(f"    Tipo Relacion: {rel_type}\n")
+                f.write(f"    End1 (Aplicacion):\n")
+                f.write(f"      ID: {end1_id}\n")
+                f.write(f"      Tipo: {end1_type}\n")
+                f.write(f"      Nombre: {end1_label}\n")
+                f.write(f"    End2 (Servicecode):\n")
+                f.write(f"      ID: {end2_id}\n")
+                f.write(f"      Tipo: {end2_type}\n")
+                f.write(f"      Nombre: {end2_label}\n")
+                f.write("\n")
+
+        logger.info(f"Guardadas {len(relaciones_usage)} relaciones usage en: {archivo}")
+        return archivo
+    except (IOError, OSError) as e:
+        logger.error(f"Error guardando {nombre_archivo} en {archivo}: {e}")
+        return None

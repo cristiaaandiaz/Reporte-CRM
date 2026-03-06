@@ -30,7 +30,8 @@ from .auth import obtener_token_ucmdb
 from .report import (
     consultar_reporte_ucmdb,
     filtrar_cis_por_tipo_servicecodes,
-    validar_nit_en_relaciones_invertidas
+    validar_nit_en_relaciones_invertidas,
+    validar_relaciones_usage_de_servicecodes
 )
 from .processor import (
     crear_directorio_ejecucion,
@@ -38,9 +39,10 @@ from .processor import (
     guardar_reporte_json,
     guardar_inconsistencias_detalle,
     enriquecer_inconsistencias_normales,
-    enriquecer_inconsistencias_particulares
+    enriquecer_inconsistencias_particulares,
+    guardar_relaciones_usage_detalle
 )
-from .ucmdb_operations import eliminar_en_ucmdb
+from .ucmdb_operations import eliminar_en_ucmdb, eliminar_relaciones_usage_de_servicecodes
 from .itsm_operations import eliminar_en_itsm
 
 logger = obtener_logger(__name__)
@@ -53,7 +55,8 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     1. Filtra CIs por tipo
     2. Valida NITs
     3. Enriquece datos
-    4. Ejecuta eliminaciones
+    4. Valida relaciones usage de servicecodes
+    5. Ejecuta eliminaciones en UCMDB (NITs + usage)
     
     Args:
         json_data: Datos JSON descargados
@@ -64,7 +67,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         Código de salida (EXIT_SUCCESS u otro)
     """
     logger.info("=" * 80)
-    logger.info("PASO 5: PROCESAR REPORTE Y VALIDAR NITs")
+    logger.info("PASO 5: PROCESAR REPORTE Y VALIDAR NITs/RELACIONES")
     logger.info("=" * 80)
     
     # Filtrar CIs
@@ -78,6 +81,11 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     logger.info(f"Inconsistencias normales: {len(inconsistencias_normales)}")
     logger.info(f"Inconsistencias particulares: {len(inconsistencias_particulares)}")
     
+    # Validar relaciones usage
+    logger.info("\n")
+    relaciones_usage_a_eliminar = validar_relaciones_usage_de_servicecodes(json_data)
+    logger.info(f"Relaciones usage validadas: {len(relaciones_usage_a_eliminar)}")
+    
     # Preparar índices para enriquecimiento
     relations = json_data.get("relations", [])
     cis = json_data.get("cis", [])
@@ -88,7 +96,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     }
     cis_by_id = {ci.get("ucmdbId"): ci for ci in cis if ci.get("ucmdbId")}
     
-    # Enriquecer inconsistencias
+    # Enriquecer inconsistencias de NITs
     relaciones_enriquecidas_normales = enriquecer_inconsistencias_normales(
         inconsistencias_normales,
         relations,
@@ -113,7 +121,13 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     else:
         logger.debug("Guardado de inconsistencias particulares deshabilitado")
     
-    # PASO 6: Eliminaciones
+    if relaciones_usage_a_eliminar:
+        if ReportGenerationConfig.REPORTE_JSON:  # Reutilizar config
+            guardar_relaciones_usage_detalle(relaciones_usage_a_eliminar, carpeta, "relaciones_usage_de_servicecodes.txt")
+        else:
+            logger.debug("Guardado de relaciones usage deshabilitado")
+    
+    # PASO 6A: Eliminaciones NITs
     logger.info("\n")
     eliminar_en_ucmdb(
         token,
@@ -122,6 +136,22 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         modo_ejecucion=ExecutionFlags.MODO_EJECUCION,
         generar_resumen=ReportGenerationConfig.RESUMEN_UCMDB
     )
+    
+    # PASO 6B: Eliminaciones usage (SOLO UCMDB)
+    logger.info("\n")
+    if relaciones_usage_a_eliminar:
+        eliminar_relaciones_usage_de_servicecodes(
+            token,
+            relaciones_usage_a_eliminar,
+            carpeta,
+            modo_ejecucion=ExecutionFlags.MODO_EJECUCION,
+            generar_resumen=ReportGenerationConfig.RESUMEN_UCMDB
+        )
+    else:
+        logger.info("=" * 80)
+        logger.info("PASO 6B: ELIMINAR RELACIONES USAGE DE SERVICECODES EN UCMDB")
+        logger.info("=" * 80)
+        logger.info("No hay relaciones usage para procesar")
     
     # Filtrar y procesar ITSM (solo con relacion_fo: true)
     logger.info("\n")

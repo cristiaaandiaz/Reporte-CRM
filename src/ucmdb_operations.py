@@ -281,3 +281,176 @@ def _guardar_resumen_ucmdb(
     except IOError as e:
         logger.error(f"Error guardando resumen UCMDB: {e}")
         return None
+
+
+def eliminar_relaciones_usage_de_servicecodes(
+    token: str,
+    relaciones_usage: List[Dict[str, Any]],
+    carpeta: Any,
+    config: Optional[UCMDBConfig] = None,
+    modo_ejecucion: str = "simulacion",
+    generar_resumen: bool = True
+) -> Optional[Any]:
+    """
+    Procesa eliminaciones en UCMDB para relaciones usage de servicecodes.
+    
+    Para cada relación usage:
+    - Realiza DELETE del ucmdbId
+    - Registra en archivo de resumen
+    - Si no existe relación (404), no falla (simplemente registra)
+    
+    Args:
+        token: Token JWT de autenticación UCMDB
+        relaciones_usage: Lista de relaciones usage a eliminar
+        carpeta: Ruta para guardar resumen
+        config: Configuración de UCMDB
+        modo_ejecucion: "simulacion" o "ejecucion"
+        generar_resumen: True para generar archivo de resumen
+    
+    Returns:
+        Lista de resultados de cada eliminación o None
+    """
+    if config is None:
+        from .config import ucmdb_config
+        config = ucmdb_config
+    
+    logger.info("=" * 80)
+    logger.info("PASO 6B: ELIMINAR RELACIONES USAGE DE SERVICECODES EN UCMDB")
+    logger.info("=" * 80)
+    
+    if modo_ejecucion == "ejecucion" and not token:
+        logger.error("ERROR CRÍTICO: Se requiere token para ejecución real")
+        return None
+    
+    if modo_ejecucion == "ejecucion":
+        logger.warning("[EJECUCIÓN] Se eliminarán relaciones usage REALMENTE en UCMDB")
+    else:
+        logger.info("[SIMULACIÓN] Se mostrarán URLs sin ejecutar")
+    
+    total = len(relaciones_usage)
+    logger.info(f"Total de relaciones usage a procesar: {total}")
+    logger.info("-" * 80)
+    
+    if not relaciones_usage:
+        logger.info("No hay relaciones usage para procesar")
+        return None
+    
+    exitosas = 0
+    fallidas = 0
+    no_encontradas = 0
+    resumen = []
+    
+    for idx, item in enumerate(relaciones_usage, 1):
+        ucmdbid = item.get("ucmdbId", "").strip()
+        end1id = item.get("end1Id", "N/A")
+        end2id = item.get("end2Id", "N/A")
+        label_end1 = item.get("display_label_end1", "N/A")
+        label_end2 = item.get("display_label_end2", "N/A")
+        rel_type = item.get("type", "usage")
+        
+        if not ucmdbid:
+            logger.warning(f"[{idx}/{total}] ucmdbId vacío, saltando")
+            continue
+        
+        # Mostrar resumen en formato legible
+        logger.info(f"[{idx}/{total}] DELETE - Relación usage: {ucmdbid}")
+        logger.info(f"  Tipo: {rel_type}")
+        logger.info(f"  Aplicación: {label_end1} ({end1id})")
+        logger.info(f"  Servicecode: {label_end2} ({end2id})")
+        
+        url = f"{config.DELETE_ENDPOINT}/{ucmdbid}"
+        
+        resultado = {
+            "numero": idx,
+            "ucmdbId": ucmdbid,
+            "url": url,
+            "metodo": "DELETE",
+            "tipo_relacion": rel_type,
+            "end1_label": label_end1,
+            "end2_label": label_end2,
+            "modo": "EJECUCION" if modo_ejecucion == "ejecucion" else "SIMULACION",
+            "estado": "PENDIENTE",
+            "detalles": ""
+        }
+        
+        if modo_ejecucion == "ejecucion":
+            exito, mensaje = ejecutar_delete_ucmdb(url, token, config)
+            
+            if exito:
+                resultado["estado"] = "EXITOSA"
+                resultado["detalles"] = mensaje
+                exitosas += 1
+                logger.info(f"  ✓ HTTP 204 OK - {ucmdbid}")
+            else:
+                # Distinguir si no existe (404) del resto de errores
+                if "404" in mensaje:
+                    resultado["estado"] = "NO_ENCONTRADA"
+                    no_encontradas += 1
+                    logger.warning(f"  ⚠ ADVERTENCIA - Relación no encontrada (404): {ucmdbid}")
+                else:
+                    resultado["estado"] = "FALLIDA"
+                    fallidas += 1
+                    logger.error(f"  ✗ ERROR - {ucmdbid}: {mensaje}")
+                resultado["detalles"] = mensaje
+        else:
+            resultado["estado"] = "SIMULADA"
+            logger.info(f"  [SIM] DELETE {url}")
+        
+        resumen.append(resultado)
+    
+    logger.info("-" * 80)
+    logger.info("Resumen eliminación usage:")
+    logger.info(f"  Total relaciones procesadas: {total}")
+    
+    if modo_ejecucion == "ejecucion":
+        logger.info(f"  Exitosas: {exitosas}")
+        logger.info(f"  Fallidas: {fallidas}")
+        logger.info(f"  No encontradas (404): {no_encontradas}")
+    else:
+        logger.info(f"  Simuladas: {total}")
+    
+    if generar_resumen:
+        _guardar_resumen_usage(resumen, carpeta)
+    
+    return resumen
+
+
+def _guardar_resumen_usage(
+    resumen: List[Dict[str, Any]],
+    carpeta: Any
+) -> Optional[Any]:
+    """Guarda resumen de operaciones de eliminación usage."""
+    from pathlib import Path
+    
+    if not isinstance(carpeta, Path):
+        carpeta = Path(carpeta)
+    
+    if carpeta.name == "disabled":
+        logger.info("Guardado de resumen usage deshabilitado")
+        return None
+    
+    archivo = carpeta / "resumen_eliminacion_usage.txt"
+    
+    try:
+        with open(archivo, "w", encoding="utf-8") as f:
+            f.write("=" * 80 + "\n")
+            f.write("RESUMEN DE ELIMINACIÓN DE RELACIONES USAGE\n")
+            f.write("=" * 80 + "\n\n")
+            
+            for item in resumen:
+                f.write(f"[{item['numero']}] {item['metodo']} {item['ucmdbId']}\n")
+                f.write(f"  URL: {item['url']}\n")
+                f.write(f"  Tipo relación: {item.get('tipo_relacion', 'N/A')}\n")
+                f.write(f"  Aplicación: {item.get('end1_label', 'N/A')}\n")
+                f.write(f"  Servicecode: {item.get('end2_label', 'N/A')}\n")
+                f.write(f"  Modo: {item['modo']}\n")
+                f.write(f"  Estado: {item['estado']}\n")
+                if item['detalles']:
+                    f.write(f"  Detalle: {item['detalles']}\n")
+                f.write("\n")
+        
+        logger.info(f"Resumen eliminación usage guardado: {archivo}")
+        return archivo
+    except IOError as e:
+        logger.error(f"Error guardando resumen usage: {e}")
+        return None

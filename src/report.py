@@ -446,3 +446,153 @@ def validar_nit_en_relaciones_invertidas(
     logger.info("=" * 60)
 
     return inconsistencias_normales, inconsistencias_particulares
+
+
+def validar_relaciones_usage_de_servicecodes(
+    json_data: Dict[str, Any],
+    config: Optional[UCMDBConfig] = None
+) -> List[Dict[str, Any]]:
+    """
+    Valida y obtiene relaciones de tipo 'usage' vinculadas a servicecodes.
+    
+    Algoritmo:
+    1. Filtra CIs de tipo 'clr_onyxservicecodes'
+    2. Para cada servicecode, busca relaciones donde:
+       - end2Id = ucmdbId del servicecode
+       - type = 'usage' (case-insensitive)
+    3. Valida que end1Id sea de tipo 'business_application'
+    4. Si cumple condiciones, agrega a lista de relaciones a eliminar
+    5. Si no existe relación, no hace nada (retorna lista_vacía)
+    
+    Args:
+        json_data: Datos JSON completos del reporte
+        config: Configuración de UCMDB (usa global si no se proporciona)
+    
+    Returns:
+        Lista de relaciones usage a eliminar con estructura:
+        {
+            "ucmdbId": "id_relacion",
+            "end1Id": "id_business_app",
+            "end2Id": "id_servicecode",
+            "type": "usage",
+            "display_label_end1": "nombre_app",
+            "display_label_end2": "nombre_servicecode",
+            "ci_type_end1": "business_application",
+            "ci_type_end2": "clr_onyxservicecodes"
+        }
+    """
+    if config is None:
+        from .config import ucmdb_config
+        config = ucmdb_config
+    
+    logger.info("=" * 80)
+    logger.info("VALIDANDO RELACIONES USAGE DE SERVICECODES")
+    logger.info("=" * 80)
+    
+    if not isinstance(json_data, dict):
+        logger.error("json_data debe ser un diccionario")
+        return []
+    
+    cis = json_data.get("cis", [])
+    relaciones = json_data.get("relations", [])
+    
+    if not cis or not relaciones:
+        logger.warning("No hay CIs o relaciones para procesar")
+        return []
+    
+    # Crear índices eficientes
+    cis_por_id: Dict[str, Dict[str, Any]] = {}
+    servicecodes: List[Dict[str, Any]] = []
+    
+    for ci in cis:
+        ucmdb_id = ci.get("ucmdbId")
+        if ucmdb_id:
+            cis_por_id[ucmdb_id] = ci
+            # Filtrar servicecodes
+            if ci.get("type") == "clr_onyxservicecodes":
+                servicecodes.append(ci)
+    
+    logger.info(f"Total CIs indexados: {len(cis_por_id)}")
+    logger.info(f"Total servicecodes encontrados: {len(servicecodes)}")
+    
+    # Crear índice de relaciones por end2Id y tipo usage
+    relaciones_usage_por_end2: Dict[str, List[Dict[str, Any]]] = {}
+    
+    for rel in relaciones:
+        rel_type = rel.get("type", "").lower()
+        if rel_type == "usage":
+            end2id = rel.get("end2Id")
+            if end2id:
+                if end2id not in relaciones_usage_por_end2:
+                    relaciones_usage_por_end2[end2id] = []
+                relaciones_usage_por_end2[end2id].append(rel)
+    
+    logger.info(f"Total relaciones usage indexadas: {sum(len(rels) for rels in relaciones_usage_por_end2.values())}")
+    
+    # Validar relaciones usage para cada servicecode
+    relaciones_a_eliminar: List[Dict[str, Any]] = []
+    servicecodes_procesados = 0
+    relaciones_validadas = 0
+    relaciones_rechazadas = 0
+    
+    for servicecode in servicecodes:
+        servicecode_id = servicecode.get("ucmdbId")
+        servicecode_label = servicecode.get("properties", {}).get("display_label", "N/A")
+        
+        servicecodes_procesados += 1
+        
+        # Buscar relaciones usage con este servicecode como end2
+        relaciones_usage = relaciones_usage_por_end2.get(servicecode_id, [])
+        
+        if not relaciones_usage:
+            logger.debug(f"[{servicecodes_procesados}] Servicecode '{servicecode_label}' -> Sin relaciones usage")
+            continue
+        
+        for rel_usage in relaciones_usage:
+            end1id = rel_usage.get("end1Id")
+            rel_id = rel_usage.get("ucmdbId")
+            
+            # Buscar CI en end1Id
+            ci_end1 = cis_por_id.get(end1id)
+            
+            if not ci_end1:
+                logger.warning(f"[{servicecodes_procesados}] Relación {rel_id}: end1Id '{end1id}' no encontrado en CIs")
+                relaciones_rechazadas += 1
+                continue
+            
+            # Validar que sea business_application
+            ci_type = ci_end1.get("type")
+            if ci_type != "business_application":
+                logger.debug(f"[{servicecodes_procesados}] Relación {rel_id}: end1Id es '{ci_type}' (no es business_application)")
+                relaciones_rechazadas += 1
+                continue
+            
+            # Relación válida para eliminar
+            end1_label = ci_end1.get("properties", {}).get("display_label", "N/A")
+            
+            relacion_valida = {
+                "ucmdbId": rel_id,
+                "end1Id": end1id,
+                "end2Id": servicecode_id,
+                "type": "usage",
+                "display_label_end1": end1_label,
+                "display_label_end2": servicecode_label,
+                "ci_type_end1": "business_application",
+                "ci_type_end2": "clr_onyxservicecodes"
+            }
+            
+            relaciones_a_eliminar.append(relacion_valida)
+            relaciones_validadas += 1
+            
+            logger.debug(f"[✓] Relación validada: {rel_id}")
+            logger.debug(f"     App: {end1_label} -> Servicecode: {servicecode_label}")
+    
+    logger.info("=" * 80)
+    logger.info("Resumen de validación de relaciones usage:")
+    logger.info(f"  Servicecodes procesados: {servicecodes_procesados}")
+    logger.info(f"  Relaciones usage encontradas: {sum(len(rels) for rels in relaciones_usage_por_end2.values())}")
+    logger.info(f"  Relaciones validadas (para eliminar): {relaciones_validadas}")
+    logger.info(f"  Relaciones rechazadas: {relaciones_rechazadas}")
+    logger.info("=" * 80)
+    
+    return relaciones_a_eliminar
