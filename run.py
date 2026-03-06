@@ -14,6 +14,13 @@ Variables de entorno requeridas en .env:
     ITSM_URL: URL base de la API ITSM
     ITSM_USERNAME: Usuario para ITSM
     ITSM_PASSWORD: Contraseña para ITSM
+
+Para parametrizar qué reportes se generan, edita src/config.py:
+    ReportGenerationConfig.REPORTE_JSON = True/False
+    ReportGenerationConfig.INCONSISTENCIAS = True/False
+    ReportGenerationConfig.INCONSISTENCIAS_PARTICULARES = True/False
+    ReportGenerationConfig.RESUMEN_UCMDB = True/False
+    ReportGenerationConfig.RESUMEN_ITSM = True/False
 """
 
 import sys
@@ -23,7 +30,12 @@ from pathlib import Path
 root_path = Path(__file__).parent
 sys.path.insert(0, str(root_path))
 
+from src.config import ReportGenerationConfig
 from src.main import main
 
 if __name__ == "__main__":
+    # Mostrar configuración de reportes
+    ReportGenerationConfig.mostrar_config()
+    
+    # Ejecutar script principal
     sys.exit(main())

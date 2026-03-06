@@ -35,21 +35,19 @@ class ExecutionFlags:
     Attributes:
         MODO_EJECUCION: "simulacion" (DRY-RUN) o "ejecucion" (eliminaciones REALES)
         USAR_REPORTE_LOCAL: True para usar JSON local, False para traer de API
-        GENERAR_RESUMEN: True para generar archivos de resumen
         CREAR_CARPETA_EJECUCION: True para crear carpeta con timestamp
     """
     
     # Modo de ejecución para AMBAS APIs (UCMDB + ITSM)
     # "simulacion" => DRY-RUN (recomendado primero)
     # "ejecucion" => Eliminaciones REALES en producción
-    MODO_EJECUCION = "ejecucion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
+    MODO_EJECUCION = "simulacion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
     
     # True = Usar JSON local para pruebas (no llama API UCMDB)
     # False = Traer reporte de la API UCMDB (producción)
     USAR_REPORTE_LOCAL = False
     
-    # Generación de reportes y carpetas
-    GENERAR_RESUMEN = True
+    # Generación de carpetas
     CREAR_CARPETA_EJECUCION = True
     
     @staticmethod
@@ -60,6 +58,55 @@ class ExecutionFlags:
                 f"MODO_EJECUCION debe ser 'simulacion' o 'ejecucion', "
                 f"no '{ExecutionFlags.MODO_EJECUCION}'"
             )
+
+
+# ==================== CONFIGURACIÓN DE GENERACIÓN DE REPORTES ====================
+class ReportGenerationConfig:
+    """
+    Permite parametrizar QUÉ archivos de reportes se generan.
+    
+    Cada parámetro controla un tipo específico de reporte.
+    Cambiar a False para deshabilitar la generación de ese archivo.
+    
+    Reportes disponibles:
+        REPORTE_JSON: Guarda el JSON completo descargado de UCMDB
+        INCONSISTENCIAS: Guarda detalle de inconsistencias normales (NIT end1 ≠ NIT end2)
+        INCONSISTENCIAS_PARTICULARES: Guarda detalle de inconsistencias particulares
+        RESUMEN_UCMDB: Guarda resumen de operaciones DELETE en UCMDB
+        RESUMEN_ITSM: Guarda resumen de operaciones PUT en ITSM
+    """
+    
+    # Reportes globales
+    REPORTE_JSON: bool = False
+    INCONSISTENCIAS: bool = True
+    INCONSISTENCIAS_PARTICULARES: bool = True
+    
+    # Reportes de operaciones
+    RESUMEN_UCMDB: bool = True
+    RESUMEN_ITSM: bool = True
+    
+    @staticmethod
+    def obtener_resumen_config() -> dict:
+        """Retorna un diccionario con la configuración actual."""
+        return {
+            "reporte_json": ReportGenerationConfig.REPORTE_JSON,
+            "inconsistencias": ReportGenerationConfig.INCONSISTENCIAS,
+            "inconsistencias_particulares": ReportGenerationConfig.INCONSISTENCIAS_PARTICULARES,
+            "resumen_ucmdb": ReportGenerationConfig.RESUMEN_UCMDB,
+            "resumen_itsm": ReportGenerationConfig.RESUMEN_ITSM,
+        }
+    
+    @staticmethod
+    def mostrar_config():
+        """Imprime la configuración actual de reportes para debugging."""
+        print("\n" + "=" * 80)
+        print("CONFIGURACIÓN DE GENERACIÓN DE REPORTES")
+        print("=" * 80)
+        config = ReportGenerationConfig.obtener_resumen_config()
+        for nombre, habilitado in config.items():
+            estado = "✓ HABILITADO" if habilitado else "✗ DESHABILITADO"
+            print(f"  {nombre.upper():40} {estado}")
+        print("=" * 80 + "\n")
 
 
 # ==================== CONFIGURACIÓN REPORTE LOCAL ====================

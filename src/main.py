@@ -22,6 +22,7 @@ from .config import (
     ExecutionFlags,
     ExitCodes,
     ReportConfig,
+    ReportGenerationConfig,
     validar_configuracion_inicial
 )
 from .logger_config import obtener_logger
@@ -100,10 +101,17 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         containment_by_end2
     )
     
-    # Guardar reportes
-    logger.info("Guardando reportes...")
-    guardar_inconsistencias_detalle(relaciones_enriquecidas_normales, carpeta, "inconsistencias.txt")
-    guardar_inconsistencias_detalle(relaciones_enriquecidas_particulares, carpeta, "inconsistencias_particulares.txt")
+    # Guardar reportes detallados (si están habilitados)
+    logger.info("Guardando reportes detallados...")
+    if ReportGenerationConfig.INCONSISTENCIAS:
+        guardar_inconsistencias_detalle(relaciones_enriquecidas_normales, carpeta, "inconsistencias.txt")
+    else:
+        logger.debug("Guardado de inconsistencias deshabilitado")
+    
+    if ReportGenerationConfig.INCONSISTENCIAS_PARTICULARES:
+        guardar_inconsistencias_detalle(relaciones_enriquecidas_particulares, carpeta, "inconsistencias_particulares.txt")
+    else:
+        logger.debug("Guardado de inconsistencias particulares deshabilitado")
     
     # PASO 6: Eliminaciones
     logger.info("\n")
@@ -112,7 +120,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         relaciones_enriquecidas_normales,
         carpeta,
         modo_ejecucion=ExecutionFlags.MODO_EJECUCION,
-        generar_resumen=ExecutionFlags.GENERAR_RESUMEN
+        generar_resumen=ReportGenerationConfig.RESUMEN_UCMDB
     )
     
     # Filtrar y procesar ITSM (solo con relacion_fo: true)
@@ -125,7 +133,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         normales_con_fo,
         carpeta,
         modo_ejecucion=ExecutionFlags.MODO_EJECUCION,
-        generar_resumen=ExecutionFlags.GENERAR_RESUMEN
+        generar_resumen=ReportGenerationConfig.RESUMEN_ITSM
     )
     
     return ExitCodes.SUCCESS
@@ -248,7 +256,8 @@ def main() -> int:
     
     carpeta_ejecucion = crear_directorio_ejecucion(ExecutionFlags.CREAR_CARPETA_EJECUCION)
     
-    if ExecutionFlags.GENERAR_RESUMEN:
+    # Guardar reporte JSON si está habilitado
+    if ReportGenerationConfig.REPORTE_JSON:
         guardar_reporte_json(json_data, carpeta_ejecucion)
     
     logger.info("")
