@@ -77,7 +77,7 @@ class ReportGenerationConfig:
     """
     
     # Reportes globales
-    REPORTE_JSON: bool = False
+    REPORTE_JSON: bool = True
     INCONSISTENCIAS: bool = True
     INCONSISTENCIAS_PARTICULARES: bool = True
     

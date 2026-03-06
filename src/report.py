@@ -485,8 +485,8 @@ def validar_relaciones_usage_de_servicecodes(
         from .config import ucmdb_config
         config = ucmdb_config
     
-    logger.info("=" * 80)
-    logger.info("VALIDANDO RELACIONES USAGE DE SERVICECODES")
+    logger.info("\n" + "=" * 80)
+    logger.info("PASO 5.1: VALIDAR RELACIONES USAGE DE SERVICECODES")
     logger.info("=" * 80)
     
     if not isinstance(json_data, dict):
@@ -512,8 +512,9 @@ def validar_relaciones_usage_de_servicecodes(
             if ci.get("type") == "clr_onyxservicecodes":
                 servicecodes.append(ci)
     
-    logger.info(f"Total CIs indexados: {len(cis_por_id)}")
-    logger.info(f"Total servicecodes encontrados: {len(servicecodes)}")
+    logger.info(f"\n[INDEXACION]")
+    logger.info(f"  CIs totales indexados:        {len(cis_por_id):>6}")
+    logger.info(f"  Servicecodes encontrados:     {len(servicecodes):>6}")
     
     # Crear índice de relaciones por end2Id y tipo usage
     relaciones_usage_por_end2: Dict[str, List[Dict[str, Any]]] = {}
@@ -527,9 +528,11 @@ def validar_relaciones_usage_de_servicecodes(
                     relaciones_usage_por_end2[end2id] = []
                 relaciones_usage_por_end2[end2id].append(rel)
     
-    logger.info(f"Total relaciones usage indexadas: {sum(len(rels) for rels in relaciones_usage_por_end2.values())}")
+    total_usage_rels = sum(len(rels) for rels in relaciones_usage_por_end2.values())
+    logger.info(f"  Relaciones 'usage' indexadas: {total_usage_rels:>6}")
     
     # Validar relaciones usage para cada servicecode
+    logger.info(f"\n[PROCESAMIENTO]")
     relaciones_a_eliminar: List[Dict[str, Any]] = []
     servicecodes_procesados = 0
     relaciones_validadas = 0
@@ -545,7 +548,7 @@ def validar_relaciones_usage_de_servicecodes(
         relaciones_usage = relaciones_usage_por_end2.get(servicecode_id, [])
         
         if not relaciones_usage:
-            logger.debug(f"[{servicecodes_procesados}] Servicecode '{servicecode_label}' -> Sin relaciones usage")
+            logger.debug(f"  [{servicecodes_procesados}] {servicecode_label:<40} -> SIN RELACIONES USAGE")
             continue
         
         for rel_usage in relaciones_usage:

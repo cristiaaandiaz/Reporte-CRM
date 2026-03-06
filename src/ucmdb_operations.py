@@ -314,7 +314,7 @@ def eliminar_relaciones_usage_de_servicecodes(
         from .config import ucmdb_config
         config = ucmdb_config
     
-    logger.info("=" * 80)
+    logger.info("\n" + "=" * 80)
     logger.info("PASO 6B: ELIMINAR RELACIONES USAGE DE SERVICECODES EN UCMDB")
     logger.info("=" * 80)
     

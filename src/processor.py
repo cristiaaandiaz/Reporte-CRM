@@ -95,8 +95,12 @@ def guardar_inconsistencias_detalle(
 
     try:
         with open(archivo, "w", encoding="utf-8") as f:
+            titulo = nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')
             f.write(SEPARADOR_REPORTE + "\n")
-            f.write(f"{nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')}\n")
+            f.write(titulo.center(80) + "\n")
+            f.write(SEPARADOR_REPORTE + "\n\n")
+            f.write(f"Fecha de generacion: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total de registros: {len(inconsistencias)}\n")
             f.write(SEPARADOR_REPORTE + "\n\n")
             
             for idx, item in enumerate(inconsistencias, 1):
@@ -111,15 +115,20 @@ def guardar_inconsistencias_detalle(
                 relacion_fo = item.get("relacion_fo", "N/A")
                 id_fo = item.get("ucmdbid_fo", "N/A")
                 
-                f.write(f"[{idx}] ID Relación: {relation_id}\n")
-                f.write(f"    End1 ID: {end1_id}\n")
-                f.write(f"    End2 ID: {end2_id}\n")
-                f.write(f"    End1 Label: {end1_label}\n")
-                f.write(f"    End2 Label: {end2_label}\n")
-                f.write(f"    NIT End1: {nit_end1}\n")
-                f.write(f"    NIT End2: {nit_end2}\n")
-                f.write(f"    Relación FO: {relacion_fo}\n")
-                f.write(f"    ID FO: {id_fo}\n")
+                f.write(f"[{idx:04d}] RELACION\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"  ID Relacion:           {relation_id}\n")
+                f.write(f"\n  EXTREMO 1 (END1):\n")
+                f.write(f"    ID:                  {end1_id}\n")
+                f.write(f"    Nombre:              {end1_label}\n")
+                f.write(f"    NIT:                 {nit_end1}\n")
+                f.write(f"\n  EXTREMO 2 (END2):\n")
+                f.write(f"    ID:                  {end2_id}\n")
+                f.write(f"    Nombre:              {end2_label}\n")
+                f.write(f"    NIT:                 {nit_end2}\n")
+                f.write(f"\n  INFORMACION ADICIONAL:\n")
+                f.write(f"    Contiene FO:         {relacion_fo}\n")
+                f.write(f"    ID FO (si aplica):   {id_fo}\n")
                 f.write("\n")
 
         logger.info(f"Guardadas {len(inconsistencias)} inconsistencias en: {archivo}")
@@ -464,8 +473,13 @@ def guardar_relaciones_usage_detalle(
 
     try:
         with open(archivo, "w", encoding="utf-8") as f:
+            titulo = nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')
             f.write(SEPARADOR_REPORTE + "\n")
-            f.write(f"{nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')}\n")
+            f.write(titulo.center(80) + "\n")
+            f.write(SEPARADOR_REPORTE + "\n\n")
+            f.write(f"Fecha de generacion: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total de registros: {len(relaciones_usage)}\n")
+            f.write(f"Tipo de relacion: usage (Aplicacion -> Servicecode)\n")
             f.write(SEPARADOR_REPORTE + "\n\n")
             
             for idx, item in enumerate(relaciones_usage, 1):
@@ -478,16 +492,17 @@ def guardar_relaciones_usage_detalle(
                 end2_type = item.get("ci_type_end2", "N/A")
                 rel_type = item.get("type", "N/A")
                 
-                f.write(f"[{idx}] ID Relacion: {relation_id}\n")
-                f.write(f"    Tipo Relacion: {rel_type}\n")
-                f.write(f"    End1 (Aplicacion):\n")
-                f.write(f"      ID: {end1_id}\n")
-                f.write(f"      Tipo: {end1_type}\n")
-                f.write(f"      Nombre: {end1_label}\n")
-                f.write(f"    End2 (Servicecode):\n")
-                f.write(f"      ID: {end2_id}\n")
-                f.write(f"      Tipo: {end2_type}\n")
-                f.write(f"      Nombre: {end2_label}\n")
+                f.write(f"[{idx:04d}] RELACION {rel_type.upper()}\n")
+                f.write("-" * 80 + "\n")
+                f.write(f"  ID Relacion:           {relation_id}\n")
+                f.write(f"\n  ORIGEN (END1 - APLICACION):\n")
+                f.write(f"    ID:                  {end1_id}\n")
+                f.write(f"    Nombre:              {end1_label}\n")
+                f.write(f"    Tipo:                {end1_type}\n")
+                f.write(f"\n  DESTINO (END2 - SERVICECODE):\n")
+                f.write(f"    ID:                  {end2_id}\n")
+                f.write(f"    Nombre:              {end2_label}\n")
+                f.write(f"    Tipo:                {end2_type}\n")
                 f.write("\n")
 
         logger.info(f"Guardadas {len(relaciones_usage)} relaciones usage en: {archivo}")
