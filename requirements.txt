@@ -13,4 +13,3 @@ urllib3>=1.26.0           # HTTP client library (incluido en requests)
 # black>=22.12.0
 # flake8>=4.0.1
 # mypy>=0.990
-``

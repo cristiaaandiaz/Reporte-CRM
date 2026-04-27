@@ -599,3 +599,92 @@ def validar_relaciones_usage_de_servicecodes(
     logger.info("=" * 80)
     
     return relaciones_a_eliminar
+
+
+def obtener_todas_relaciones_ownership_para_itsm(
+    json_data: Dict[str, Any],
+    config: Optional[UCMDBConfig] = None
+) -> List[Dict[str, Any]]:
+    """
+    Extrae TODAS las relaciones ownership entre CRM y Servicecodes para procesamiento en ITSM.
+    
+    No requiere inconsistencias de NIT. Busca todas las relaciones válidas donde:
+    1. Tipo de relación: ownership
+    2. End1: clr_onyxcrm (tiene clr_onyxdb_company_nit)
+    3. End2: clr_onyxservicecodes (tiene clr_onyxdb_companynit)
+    
+    Args:
+        json_data: Datos JSON del reporte
+        config: Configuración de UCMDB
+    
+    Returns:
+        Lista de relaciones enriquecidas con información de NITs y CIs
+    """
+    if config is None:
+        from .config import ucmdb_config
+        config = ucmdb_config
+    
+    cis = json_data.get("cis", [])
+    relaciones = json_data.get("relations", [])
+    
+    if not cis or not relaciones:
+        logger.warning("No hay CIs o relaciones para procesar")
+        return []
+    
+    # Crear índices
+    ci_by_id = {ci.get("ucmdbId"): ci for ci in cis if ci.get("ucmdbId")}
+    
+    logger.info("=" * 80)
+    logger.info("PASO 5.2: OBTENER TODAS LAS RELACIONES OWNERSHIP PARA ITSM")
+    logger.info("=" * 80)
+    
+    relaciones_itsm = []
+    
+    for rel in relaciones:
+        rel_type = rel.get("type", "").lower()
+        
+        # Solo procesar relaciones ownership
+        if rel_type != "ownership":
+            continue
+        
+        end1_id = rel.get("end1Id")
+        end2_id = rel.get("end2Id")
+        
+        end1 = ci_by_id.get(end1_id)
+        end2 = ci_by_id.get(end2_id)
+        
+        if not (end1 and end2):
+            continue
+        
+        end1_type = end1.get("type", "")
+        end2_type = end2.get("type", "")
+        
+        # Filtrar: End1 debe ser CRM, End2 debe ser Servicecode
+        if end1_type != "clr_onyxcrm" or end2_type != "clr_onyxservicecodes":
+            continue
+        
+        props1 = end1.get("properties", {})
+        props2 = end2.get("properties", {})
+        
+        nit_end1 = props1.get("clr_onyxdb_company_nit", "N/A").strip()
+        nit_end2 = props2.get("clr_onyxdb_companynit", "N/A").strip()
+        
+        # Crear entrada enriquecida
+        rel_enriquecida = {
+            "ucmdbId": rel.get("ucmdbId"),
+            "end1Id": end1_id,
+            "end2Id": end2_id,
+            "nit_end1": nit_end1,
+            "nit_end2": nit_end2,
+            "display_label_end1": props1.get("display_label", "N/A"),
+            "display_label_end2": props2.get("display_label", "N/A"),
+            "relacion_fo": False,  # Para compatibilidad con procesamiento existente
+            "ucmdbid_fo": "N/A"
+        }
+        
+        relaciones_itsm.append(rel_enriquecida)
+    
+    logger.info(f"Relaciones ownership encontradas: {len(relaciones_itsm)}")
+    logger.info("=" * 80)
+    
+    return relaciones_itsm

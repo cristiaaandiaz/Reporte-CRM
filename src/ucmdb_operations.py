@@ -223,8 +223,9 @@ def eliminar_en_ucmdb(
             else:
                 resultado["estado"] = "SIMULADA"
                 logger.info(f"  [SIM] DELETE {url}")
+                # En simulación, aclarar si es el registro FO siendo eliminado
                 if relacion_fo and ucmdbid_fo != "N/A" and ucmdb_id == ucmdbid_fo:
-                    logger.info(f"       + Relación FO también se eliminaría: {ucmdbid}")
+                    logger.info(f"       → (Este es el registro FO)")
             
             resumen.append(resultado)
     

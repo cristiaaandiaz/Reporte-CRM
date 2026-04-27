@@ -41,7 +41,7 @@ class ExecutionFlags:
     # Modo de ejecución para AMBAS APIs (UCMDB + ITSM)
     # "simulacion" => DRY-RUN (recomendado primero)
     # "ejecucion" => Eliminaciones REALES en producción
-    MODO_EJECUCION = "simulacion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
+    MODO_EJECUCION = "ejecucion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
     
     # True = Usar JSON local para pruebas (no llama API UCMDB)
     # False = Traer reporte de la API UCMDB (producción)
@@ -104,7 +104,7 @@ class ReportGenerationConfig:
         print("=" * 80)
         config = ReportGenerationConfig.obtener_resumen_config()
         for nombre, habilitado in config.items():
-            estado = "✓ HABILITADO" if habilitado else "✗ DESHABILITADO"
+            estado = "[ON]  HABILITADO" if habilitado else "[OFF] DESHABILITADO"
             print(f"  {nombre.upper():40} {estado}")
         print("=" * 80 + "\n")
 
@@ -114,7 +114,7 @@ class ReportConfig:
     """Configuración para lectura de reportes."""
     
     # Ruta del reporte JSON local para pruebas/debug
-    RUTA_REPORTE_LOCAL = REPORTS_BASE_DIR / "reporte_test.json"
+    RUTA_REPORTE_LOCAL = REPORTS_BASE_DIR / "reporte.json"
     
     # Nombre del reporte en UCMDB
     REPORT_NAME = "Reporte_Clientes_Onyx-uCMDB"
