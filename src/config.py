@@ -45,7 +45,7 @@ class ExecutionFlags:
     
     # True = Usar JSON local para pruebas (no llama API UCMDB)
     # False = Traer reporte de la API UCMDB (producción)
-    USAR_REPORTE_LOCAL = True
+    USAR_REPORTE_LOCAL = False
     
     # Generación de carpetas
     CREAR_CARPETA_EJECUCION = True

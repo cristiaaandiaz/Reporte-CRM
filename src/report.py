@@ -429,22 +429,20 @@ def validar_nit_en_relaciones_invertidas(
                 "display_label_end2": display_label_end2
             }
             
-            if contar_letras(nit_end1_norm) or contar_letras(nit_end2_norm):
-                inconsistencias_particulares.append(inconsistencia)
-            else:
-                inconsistencias_normales.append(inconsistencia)
+            # Todas las diferencias de NITs se eliminan (sin excepciones)
+            inconsistencias_normales.append(inconsistencia)
 
         procesadas += 1
 
     logger.info("=" * 60)
     logger.info("Resumen de validación de NITs:")
     logger.info(f"  Total de relaciones procesadas: {procesadas}")
-    logger.info(f"  Inconsistencias normales encontradas: {len(inconsistencias_normales)}")
-    logger.info(f"  Inconsistencias particulares encontradas: {len(inconsistencias_particulares)}")
+    logger.info(f"  Inconsistencias a eliminar (todas las diferencias de NITs): {len(inconsistencias_normales)}")
     logger.info(f"  Nodos faltantes: {nodos_faltantes}")
     logger.info(f"  NITs faltantes: {nits_faltantes}")
     logger.info("=" * 60)
 
+    # Retorna lista vacía para inconsistencias_particulares (ya no se generan)
     return inconsistencias_normales, inconsistencias_particulares
 
 

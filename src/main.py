@@ -104,10 +104,8 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         cis_by_id
     )
     
-    relaciones_enriquecidas_particulares = enriquecer_inconsistencias_particulares(
-        inconsistencias_particulares,
-        containment_by_end2
-    )
+    # NOTA: Ya no se generan inconsistencias_particulares
+    # Todas las diferencias de NITs se eliminan como inconsistencias normales
     
     # Guardar reportes detallados (si están habilitados)
     logger.info("Guardando reportes detallados...")
@@ -116,10 +114,8 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     else:
         logger.debug("Guardado de inconsistencias deshabilitado")
     
-    if ReportGenerationConfig.INCONSISTENCIAS_PARTICULARES:
-        guardar_inconsistencias_detalle(relaciones_enriquecidas_particulares, carpeta, "inconsistencias_particulares.txt")
-    else:
-        logger.debug("Guardado de inconsistencias particulares deshabilitado")
+    # Ya no se genera archivo de inconsistencias particulares
+    # (todas las diferencias de NITs se eliminan)
     
     if relaciones_usage_a_eliminar:
         if ReportGenerationConfig.REPORTE_JSON:  # Reutilizar config
