@@ -294,7 +294,8 @@ def eliminar_en_itsm(
     carpeta: Any,
     config: Optional[ITSMConfig] = None,
     modo_ejecucion: str = "simulacion",
-    generar_resumen: bool = True
+    generar_resumen: bool = True,
+    cis_by_id: Optional[Dict[str, Any]] = None
 ) -> None:
     """
     Procesa actualizaciones en ITSM SOLO para relaciones con relacion_fo: true.
@@ -311,6 +312,7 @@ def eliminar_en_itsm(
         config: Configuración de ITSM
         modo_ejecucion: "simulacion" o "ejecucion"
         generar_resumen: True para generar archivo de resumen
+        cis_by_id: Diccionario de CIs por ucmdbId para obtener display_label
     """
     if config is None:
         from .config import itsm_config
@@ -350,6 +352,19 @@ def eliminar_en_itsm(
     exitosas = 0
     fallidas = 0
     
+    # Función helper para obtener display_label de un CI desde cis_by_id
+    def obtener_display_label(ucmdb_id: str) -> str:
+        if cis_by_id and ucmdb_id in cis_by_id:
+            ci = cis_by_id[ucmdb_id]
+            # Primero buscar en properties.display_label
+            props = ci.get("properties", {})
+            if props.get("display_label"):
+                return props.get("display_label")
+            # Luego buscar en el campo label del CI
+            if ci.get("label"):
+                return ci.get("label")
+        return "N/A"
+    
     for idx, item in enumerate(relaciones_validas, 1):
         end2id = item.get("end2Id", "").strip()
         ucmdbid = item.get("ucmdbId", "").strip()
@@ -373,6 +388,9 @@ def eliminar_en_itsm(
             "numero": idx,
             "ucmdbId": ucmdbid,
             "end2Id": end2id,
+            "display_label_end1": label_end1,
+            "display_label_end2": label_end2,
+            "display_label_end2_obtenido": obtener_display_label(end2id),
             "parentCI": None,
             "url_query": f"{config.BASE_URL}/Relationships?query=ChildCIs=\"{quote(str(end2id), safe='')}\"&view=expand",
             "url_delete": None,
@@ -461,6 +479,9 @@ def _guardar_resumen_itsm(
             for item in resumen:
                 f.write(f"[{item['numero']}] Relación: {item['ucmdbId']}\n")
                 f.write(f"  End2 ID: {item['end2Id']}\n")
+                f.write(f"  Display Label End2 (desde CIs): {item.get('display_label_end2_obtenido', 'N/A')}\n")
+                f.write(f"  Display Label End1: {item.get('display_label_end1', 'N/A')}\n")
+                f.write(f"  Display Label End2: {item.get('display_label_end2', 'N/A')}\n")
                 
                 if item['parentCI']:
                     f.write(f"  ParentCI obtenido: {item['parentCI']}\n")

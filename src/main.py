@@ -163,7 +163,8 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         normales_con_fo,
         carpeta,
         modo_ejecucion=ExecutionFlags.MODO_EJECUCION,
-        generar_resumen=ReportGenerationConfig.RESUMEN_ITSM
+        generar_resumen=ReportGenerationConfig.RESUMEN_ITSM,
+        cis_by_id=cis_by_id
     )
     
     return ExitCodes.SUCCESS
