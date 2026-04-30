@@ -1,5 +1,8 @@
 # Diagramas de Flujo Detallados - Script UCMDB
 
+**Versión:** 2.0  
+**Fecha:** Abril 2026
+
 ---
 
 ## 1. Flujo Principal (main.py)

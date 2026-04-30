@@ -41,7 +41,7 @@ class ExecutionFlags:
     # Modo de ejecución para AMBAS APIs (UCMDB + ITSM)
     # "simulacion" => DRY-RUN (recomendado primero)
     # "ejecucion" => Eliminaciones REALES en producción
-    MODO_EJECUCION = "ejecucion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
+    MODO_EJECUCION = "simulacion"  # Cambiar a "simulacion" para pruebas sin eliminar nada
     
     # True = Usar JSON local para pruebas (no llama API UCMDB)
     # False = Traer reporte de la API UCMDB (producción)
@@ -70,8 +70,7 @@ class ReportGenerationConfig:
     
     Reportes disponibles:
         REPORTE_JSON: Guarda el JSON completo descargado de UCMDB
-        INCONSISTENCIAS: Guarda detalle de inconsistencias normales (NIT end1 ≠ NIT end2)
-        INCONSISTENCIAS_PARTICULARES: Guarda detalle de inconsistencias particulares
+        INCONSISTENCIAS: Guarda detalle de inconsistencias (NIT end1 ≠ NIT end2)
         RESUMEN_UCMDB: Guarda resumen de operaciones DELETE en UCMDB
         RESUMEN_ITSM: Guarda resumen de operaciones PUT en ITSM
     """
@@ -79,7 +78,6 @@ class ReportGenerationConfig:
     # Reportes globales
     REPORTE_JSON: bool = True
     INCONSISTENCIAS: bool = True
-    INCONSISTENCIAS_PARTICULARES: bool = True
     
     # Reportes de operaciones
     RESUMEN_UCMDB: bool = True
@@ -91,7 +89,6 @@ class ReportGenerationConfig:
         return {
             "reporte_json": ReportGenerationConfig.REPORTE_JSON,
             "inconsistencias": ReportGenerationConfig.INCONSISTENCIAS,
-            "inconsistencias_particulares": ReportGenerationConfig.INCONSISTENCIAS_PARTICULARES,
             "resumen_ucmdb": ReportGenerationConfig.RESUMEN_UCMDB,
             "resumen_itsm": ReportGenerationConfig.RESUMEN_ITSM,
         }

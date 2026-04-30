@@ -219,63 +219,6 @@ def enriquecer_inconsistencias_normales(
     return relaciones_enriquecidas
 
 
-def enriquecer_inconsistencias_particulares(
-    inconsistencias: List[Dict[str, Any]],
-    containment_by_end2: Dict[str, Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    """
-    Enriquece inconsistencias particulares con información de contención.
-    
-    Algoritmo:
-    1. Para cada inconsistencia particular, obtiene end2Id
-    2. Busca en containment_by_end2 para extraer end1Id_containment
-    3. Si no encuentra la información, asigna "N/A"
-    4. Retorna lista de inconsistencias con campo end1Id_containment añadido
-    
-    Args:
-        inconsistencias: Lista de inconsistencias particulares a enriquecer
-        containment_by_end2: Índice de relaciones de contención (clave: end2Id)
-    
-    Returns:
-        Lista de inconsistencias enriquecidas con información de contención
-        
-    Ejemplo:
-        >>> inconsistencias = [{"end2Id": "ci123", "reltype": "ITSM"}]
-        >>> containment = {"ci123": {"end1Id": "container456"}}
-        >>> resultado = enriquecer_inconsistencias_particulares(inconsistencias, containment)
-        >>> resultado[0]["end1Id_containment"]  # "container456"
-    """
-    if not inconsistencias:
-        logger.debug("No hay inconsistencias particulares para enriquecer")
-        return []
-    
-    relaciones_enriquecidas = []
-    enriquecidas_exitosas = 0
-    no_encontradas = 0
-    
-    for item in inconsistencias:
-        end2id = item.get("end2Id")
-        
-        if not end2id:
-            logger.warning(f"Item sin end2Id: {item}")
-            item["end1Id_containment"] = "N/A"
-            no_encontradas += 1
-        elif end2id in containment_by_end2:
-            containment_rel = containment_by_end2[end2id]
-            item["end1Id_containment"] = containment_rel.get("end1Id", "N/A")
-            enriquecidas_exitosas += 1
-        else:
-            item["end1Id_containment"] = "N/A"
-            no_encontradas += 1
-        
-        relaciones_enriquecidas.append(item.copy())
-    
-    logger.info(f"Enriquecidas {enriquecidas_exitosas}/{len(relaciones_enriquecidas)} "
-                f"inconsistencias particulares (no encontradas: {no_encontradas})")
-    
-    return relaciones_enriquecidas
-
-
 def crear_directorio_ejecucion(crear_carpeta: bool = True) -> Path:
     """
     Crea directorio de ejecución con timestamp o retorna path 'disabled'.

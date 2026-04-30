@@ -1,5 +1,8 @@
 # Guía de Referencia Rápida - Script UCMDB
 
+**Versión:** 2.0  
+**Fecha:** Abril 2026
+
 **Uso rápido:** Consulta esta guía para acciones comunes sin leer toda la documentación.
 
 ---
@@ -58,16 +61,24 @@ class ExecutionFlags:
     # Cambiar AQUÍ:
     MODO_EJECUCION = "simulacion"      # "simulacion" o "ejecucion"
     USAR_REPORTE_LOCAL = False         # True para JSON local
-    GENERAR_RESUMEN = True             # Generar reportes
     CREAR_CARPETA_EJECUCION = True     # Carpeta con timestamp
 ```
 
 | Flag | Opción 1 | Opción 2 | Recomendado |
-|------|----------|----------|------------|
+|------|----------|----------|-------------|
 | MODO | "simulacion" | "ejecucion" | simulacion (primero) |
 | USAR_REPORTE_LOCAL | True | False | True (desarrollo) |
-| GENERAR_RESUMEN | True | False | True (siempre) |
 | CREAR_CARPETA | True | False | True (mejor) |
+
+**Configuración de Reportes:**
+
+```python
+class ReportGenerationConfig:
+    REPORTE_JSON = True        # JSON completo descargado
+    INCONSISTENCIAS = True     # Detalle de inconsistencias
+    RESUMEN_UCMDB = True      # Resumen de operaciones DELETE
+    RESUMEN_ITSM = True       # Resumen de operaciones PUT
+```
 
 ---
 

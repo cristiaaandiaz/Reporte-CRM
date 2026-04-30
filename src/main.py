@@ -10,7 +10,6 @@ Proporciona funcionalidad completa para:
 Configuración controlada por flags en src/config.py:
 - MODO_EJECUCION: "simulacion" (DRY-RUN) o "ejecucion" (real)
 - USAR_REPORTE_LOCAL: True (JSON local) o False (API UCMDB)
-- GENERAR_RESUMEN: True para generar archivos de resumen
 - CREAR_CARPETA_EJECUCION: True para crear carpeta con timestamp
 """
 
@@ -39,7 +38,6 @@ from .processor import (
     guardar_reporte_json,
     guardar_inconsistencias_detalle,
     enriquecer_inconsistencias_normales,
-    enriquecer_inconsistencias_particulares,
     guardar_relaciones_usage_detalle
 )
 from .ucmdb_operations import eliminar_en_ucmdb, eliminar_relaciones_usage_de_servicecodes
@@ -118,7 +116,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     # (todas las diferencias de NITs se eliminan)
     
     if relaciones_usage_a_eliminar:
-        if ReportGenerationConfig.REPORTE_JSON:  # Reutilizar config
+        if ReportGenerationConfig.INCONSISTENCIAS:  # Reutilizar config
             guardar_relaciones_usage_detalle(relaciones_usage_a_eliminar, carpeta, "relaciones_usage_de_servicecodes.txt")
         else:
             logger.debug("Guardado de relaciones usage deshabilitado")

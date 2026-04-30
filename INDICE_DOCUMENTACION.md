@@ -1,5 +1,8 @@
 # 📚 Índice de Documentación - Script UCMDB
 
+**Versión:** 2.0  
+**Fecha:** Abril 2026
+
 Bienvenido a la documentación técnica completa del **Script de Validación de NITs en UCMDB e ITSM**.
 
 Esta documentación proporciona toda la información necesaria para entender, usar y mantener el script.

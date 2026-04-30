@@ -324,18 +324,6 @@ def filtrar_cis_por_tipo_servicecodes(
     return nodos_filtrados
 
 
-def contar_letras(s: str) -> bool:
-    """
-    Verifica si hay al menos una letra en la cadena.
-    
-    Args:
-        s: String a validar
-    
-    Returns:
-        True si hay al menos una letra
-    """
-    return any(c.isalpha() for c in s)
-
 
 def validar_nit_en_relaciones_invertidas(
     json_data: Dict[str, Any],
