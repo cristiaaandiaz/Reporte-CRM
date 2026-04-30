@@ -1,5 +1,8 @@
 # AGENTS.md - Script UCMDB
 
+**Versión:** 2.0  
+**Fecha:** Abril 2026
+
 ## Propósito del Script
 Valida la consistencia de NITs entre UCMDB e ITSM y elimina relaciones inconsistentes.
 - Compara NITs en relaciones ownership entre `clr_onyxcrm` y `clr_onyxservicecodes`
@@ -73,3 +76,23 @@ python run.py
 - En simulación, no se hacen cambios reales en ningún sistema
 - ITSM solo procesa relaciones con `relacion_fo=true` (contienen FO)
 - La eliminación en ITSM requiere dos pasos: GET (obtener ParentCI) → PUT (marcar Removed)
+
+## Tests
+```bash
+# Ejecutar tests
+python -m pytest tests/ -v
+
+# 71 tests pasando
+```
+
+## Verificación Pre-Ejecución
+```bash
+# 1. Verificar sintaxis
+python -m py_compile src/*.py
+
+# 2. Ejecutar tests
+python -m pytest tests/ -v
+
+# 3. Ejecutar simulación
+python run.py
+```

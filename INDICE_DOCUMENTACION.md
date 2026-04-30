@@ -67,6 +67,21 @@ Incluye:
 
 ---
 
+### 4. 🤖 [**AGENTS.md**](AGENTS.md)
+**Para:** Agentes IA y desarrolladores nuevos  
+**Versión:** 2.0
+**Duración de lectura:** 2-3 minutos
+
+Incluye:
+- ⚡ Comandos esenciales
+- 🔧 Configuración crítica
+- 📁 Estructura del proyecto
+- 🧪 Tests disponibles
+
+**👉 LEE ESTO si usas OpenCode o agentes IA**
+
+---
+
 ## 🎯 Cómo Usar esta Documentación
 
 ### Para Iniciarse Rápido

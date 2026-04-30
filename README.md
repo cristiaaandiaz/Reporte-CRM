@@ -1,5 +1,8 @@
 # Script de Validación de Consistencia UCMDB-ITSM
 
+**Versión:** 2.0  
+**Fecha:** Abril 2026
+
 Este script valida y elimina relaciones inconsistentes entre UCMDB e ITSM comparando NITs de clientes.
 
 ## Propósito
@@ -150,6 +153,46 @@ Verificar que `ITSM_URL` tenga el formato correcto: `http://servidor:puerto/SM/9
 
 ### Verificación SSL deshabilitada
 Si se muestra la advertencia, establecer `VERIFY_SSL=True` en `.env` para producción.
+
+## Tests
+
+### Ejecutar tests unitarios
+```bash
+python -m pytest tests/ -v
+```
+
+### Resultados
+- **71 tests** pasando
+- Cobertura: config, auth, report, processor, ucmdb_operations, itsm_operations
+
+## Estructura de Tests
+
+```
+tests/
+├── conftest.py                 # Fixtures y configuración
+├── test_config.py             # Tests de configuración
+├── test_auth.py               # Tests de autenticación
+├── test_report.py             # Tests de validación de datos
+├── test_processor.py          # Tests de procesamiento
+├── test_ucmdb_operations.py   # Tests de operaciones UCMDB
+└── test_itsm_operations.py    # Tests de operaciones ITSM
+```
+
+## Verificaciones Pre-Deployment
+
+```bash
+# 1. Verificar sintaxis
+python -m py_compile src/*.py
+
+# 2. Ejecutar tests
+python -m pytest tests/ -v
+
+# 3. Ejecutar en modo simulación
+python run.py
+
+# 4. Revisar reportes generados
+ls reports/ejecucion_*/
+```
 
 ## Licencia
 Uso interno - Triara

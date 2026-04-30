@@ -1,5 +1,8 @@
 # DOCUMENTACIÓN TÉCNICA
 
+**Versión:** 2.0  
+**Fecha:** Abril 2026
+
 ## Script de Validación de Consistencia UCMDB-ITSM
 
 ### Descripción General
@@ -192,3 +195,28 @@ Editar `src/config.py`:
 USAR_REPORTE_LOCAL = True
 ```
 Colocar JSON en `reports/reporte.json`
+
+## Tests Unitarios
+
+El proyecto incluye 71 tests unitarios que verifican:
+
+| Módulo | Tests | Descripción |
+|--------|-------|-------------|
+| config.py | 10 | Flags, configuraciones, códigos de salida |
+| auth.py | 14 | Autenticación JWT, validación de credenciales |
+| report.py | 11 | Filtrado de CIs, validación de NITs, relaciones usage |
+| processor.py | 11 | Guardado de archivos, enriquecimiento, validación |
+| ucmdb_operations.py | 8 | DELETE en UCMDB, reintentos |
+| itsm_operations.py | 12 | PUT en ITSM, consulta de ParentCI |
+
+### Ejecutar tests
+```bash
+python -m pytest tests/ -v
+```
+
+### Agregar nuevos tests
+Los tests usan pytest con fixtures definidas en `tests/conftest.py`:
+- `temp_dir`: Directorio temporal para pruebas
+- `sample_json_data`: Datos de ejemplo para validación
+- `sample_json_file`: Archivo JSON temporal
+- `mock_ucmdb_config`: Configuración mock para pruebas
