@@ -1,21 +1,11 @@
 """
-Script de Validación de Consistencia de NITs en UCMDB e ITSM.
-
-Proporciona funcionalidad completa para:
-1. Autenticar contra UCMDB
-2. Obtener un reporte JSON de relaciones
-3. Validar la consistencia de NITs
-4. Simular o ejecutar eliminaciones en UCMDB e ITSM
-
-Configuración controlada por flags en src/config.py:
-- MODO_EJECUCION: "simulacion" (DRY-RUN) o "ejecucion" (real)
-- USAR_REPORTE_LOCAL: True (JSON local) o False (API UCMDB)
-- CREAR_CARPETA_EJECUCION: True para crear carpeta con timestamp
+Orquestador principal del flujo de validación de NITs.
 """
 
 import sys
 import json
 from pathlib import Path
+from typing import Optional
 
 from .config import (
     ExecutionFlags,
@@ -46,45 +36,24 @@ from .itsm_operations import eliminar_en_itsm
 logger = obtener_logger(__name__)
 
 
-def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
-    """
-    Procesa el reporte JSON completo:
-    
-    1. Filtra CIs por tipo
-    2. Valida NITs
-    3. Enriquece datos
-    4. Valida relaciones usage de servicecodes
-    5. Ejecuta eliminaciones en UCMDB (NITs + usage)
-    
-    Args:
-        json_data: Datos JSON descargados
-        carpeta: Carpeta para guardar resultados
-        token: Token JWT de UCMDB
-    
-    Returns:
-        Código de salida (EXIT_SUCCESS u otro)
-    """
+def procesar_reporte(json_data: dict, carpeta: Path, token: Optional[str]) -> int:
+    """Procesa el reporte JSON: filtra, valida NITs, elimina."""
     logger.info("=" * 80)
-    logger.info("PASO 5: PROCESAR REPORTE Y VALIDAR NITs/RELACIONES")
+    logger.info("PASO 5: PROCESAR REPORTE Y VALIDAR NITs")
     logger.info("=" * 80)
     
-    # Filtrar CIs
     logger.info("Filtrando CIs por tipo 'clr_onyxservicecodes'...")
     cis_filtrados = filtrar_cis_por_tipo_servicecodes(json_data)
     logger.info(f"Total CIs filtrados: {len(cis_filtrados)}")
     
-    # Validar NITs
     logger.info("Validando NITs en relaciones...")
     inconsistencias_normales, inconsistencias_particulares = validar_nit_en_relaciones_invertidas(json_data)
     logger.info(f"Inconsistencias normales: {len(inconsistencias_normales)}")
-    logger.info(f"Inconsistencias particulares: {len(inconsistencias_particulares)}")
     
-    # Validar relaciones usage
-    logger.info("\n")
+    logger.info("\nValidando relaciones usage...")
     relaciones_usage_a_eliminar = validar_relaciones_usage_de_servicecodes(json_data)
-    logger.info(f"Relaciones usage validadas: {len(relaciones_usage_a_eliminar)}")
+    logger.info(f"Relaciones usage a eliminar: {len(relaciones_usage_a_eliminar)}")
     
-    # Preparar índices para enriquecimiento
     relations = json_data.get("relations", [])
     cis = json_data.get("cis", [])
     
@@ -94,7 +63,7 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
     }
     cis_by_id = {ci.get("ucmdbId"): ci for ci in cis if ci.get("ucmdbId")}
     
-    # Enriquecer inconsistencias de NITs
+    logger.info("Enriqueciendo inconsistencias...")
     relaciones_enriquecidas_normales = enriquecer_inconsistencias_normales(
         inconsistencias_normales,
         relations,
@@ -102,27 +71,16 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         cis_by_id
     )
     
-    # NOTA: Ya no se generan inconsistencias_particulares
-    # Todas las diferencias de NITs se eliminan como inconsistencias normales
-    
-    # Guardar reportes detallados (si están habilitados)
     logger.info("Guardando reportes detallados...")
     if ReportGenerationConfig.INCONSISTENCIAS:
         guardar_inconsistencias_detalle(relaciones_enriquecidas_normales, carpeta, "inconsistencias.txt")
-    else:
-        logger.debug("Guardado de inconsistencias deshabilitado")
-    
-    # Ya no se genera archivo de inconsistencias particulares
-    # (todas las diferencias de NITs se eliminan)
     
     if relaciones_usage_a_eliminar:
-        if ReportGenerationConfig.INCONSISTENCIAS:  # Reutilizar config
-            guardar_relaciones_usage_detalle(relaciones_usage_a_eliminar, carpeta, "relaciones_usage_de_servicecodes.txt")
-        else:
-            logger.debug("Guardado de relaciones usage deshabilitado")
+        guardar_relaciones_usage_detalle(relaciones_usage_a_eliminar, carpeta, "relaciones_usage_de_servicecodes.txt")
     
-    # PASO 6A: Eliminaciones NITs
-    logger.info("\n")
+    logger.info("\n" + "=" * 80)
+    logger.info("PASO 6A: ELIMINAR EN UCMDB (NITs)")
+    logger.info("=" * 80)
     eliminar_en_ucmdb(
         token,
         relaciones_enriquecidas_normales,
@@ -131,8 +89,9 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
         generar_resumen=ReportGenerationConfig.RESUMEN_UCMDB
     )
     
-    # PASO 6B: Eliminaciones usage (SOLO UCMDB)
-    logger.info("\n")
+    logger.info("\n" + "=" * 80)
+    logger.info("PASO 6B: ELIMINAR RELACIONES USAGE EN UCMDB")
+    logger.info("=" * 80)
     if relaciones_usage_a_eliminar:
         eliminar_relaciones_usage_de_servicecodes(
             token,
@@ -142,13 +101,11 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
             generar_resumen=ReportGenerationConfig.RESUMEN_UCMDB
         )
     else:
-        logger.info("=" * 80)
-        logger.info("PASO 6B: ELIMINAR RELACIONES USAGE DE SERVICECODES EN UCMDB")
-        logger.info("=" * 80)
         logger.info("No hay relaciones usage para procesar")
     
-    # Filtrar y procesar ITSM (solo con relacion_fo: true)
-    logger.info("\n")
+    logger.info("\n" + "=" * 80)
+    logger.info("PASO 6C: ACTUALIZAR EN ITSM")
+    logger.info("=" * 80)
     normales_con_fo = [
         item for item in relaciones_enriquecidas_normales
         if item.get("relacion_fo") and item.get("ucmdbid_fo") != "N/A"
@@ -165,21 +122,12 @@ def procesar_reporte(json_data: dict, carpeta: Path, token: str) -> int:
 
 
 def main() -> int:
-    """
-    Función principal del script.
-    
-    Orquesta todo el proceso de validación y eliminación.
-    
-    Returns:
-        Código de salida (0 = éxito, otro = error)
-    """
+    """Función principal del script."""
     logger.info("=" * 80)
     logger.info("VALIDACIÓN DE CONSISTENCIA DE NITs EN UCMDB E ITSM")
     logger.info("=" * 80)
     logger.info(f"Modo: {ExecutionFlags.MODO_EJECUCION.upper()}")
-    logger.info("")
     
-    # Validación de configuración
     try:
         validar_configuracion_inicial()
     except ValueError as e:
@@ -187,17 +135,15 @@ def main() -> int:
         return ExitCodes.CONFIG_ERROR
     
     if ExecutionFlags.MODO_EJECUCION == "ejecucion":
-        logger.warning("⚠️  MODO EJECUCIÓN REAL - Se realizarán cambios en los sistemas")
+        logger.warning("⚠️ MODO EJECUCIÓN - Se realizarán cambios reales")
     else:
-        logger.info("ℹ️  MODO SIMULACIÓN - No se realizarán cambios reales")
+        logger.info("ℹ️ MODO SIMULACIÓN - Sin cambios reales")
     
-    logger.info("")
-    
-    # PASO 1: Autenticación
+    logger.info("\n" + "=" * 80)
     logger.info("PASO 1: AUTENTICACIÓN UCMDB")
-    logger.info("-" * 80)
+    logger.info("=" * 80)
     
-    token = None
+    token: Optional[str] = None
     
     if not ExecutionFlags.USAR_REPORTE_LOCAL or ExecutionFlags.MODO_EJECUCION == "ejecucion":
         logger.info("Obteniendo token de autenticación...")
@@ -207,20 +153,18 @@ def main() -> int:
             logger.error("Falló autenticación con UCMDB")
             return ExitCodes.AUTH_ERROR
         
-        logger.info("✓ Token obtenido exitosamente")
+        logger.info("✓ Token obtenido")
     else:
         logger.info("Token no requerido (modo simulación con reporte local)")
     
-    logger.info("")
-    
-    # PASO 2: Obtener reporte
+    logger.info("\n" + "=" * 80)
     logger.info("PASO 2: OBTENER REPORTE")
-    logger.info("-" * 80)
+    logger.info("=" * 80)
     
-    reporte_contenido = None
+    reporte_contenido: Optional[str] = None
     
     if ExecutionFlags.USAR_REPORTE_LOCAL:
-        logger.info(f"Cargando reporte local desde: {ReportConfig.RUTA_REPORTE_LOCAL}")
+        logger.info(f"Cargando reporte local: {ReportConfig.RUTA_REPORTE_LOCAL}")
         try:
             with open(ReportConfig.RUTA_REPORTE_LOCAL, "r", encoding="utf-8") as f:
                 reporte_contenido = f.read()
@@ -243,55 +187,46 @@ def main() -> int:
             logger.error(f"Error al consultar reporte: {e}")
             return ExitCodes.REPORT_ERROR
     
-    logger.info("")
-    
-    # PASO 3: Procesar JSON
+    logger.info("\n" + "=" * 80)
     logger.info("PASO 3: PROCESAR JSON")
-    logger.info("-" * 80)
+    logger.info("=" * 80)
     
     try:
         json_data = json.loads(reporte_contenido)
     except json.JSONDecodeError as e:
         logger.error(f"Error al decodificar JSON: {e}")
         logger.error(f"  Posición: línea {e.lineno}, columna {e.colno}")
-        logger.error(f"  Contexto: {e.doc[max(0, e.pos-50):e.pos+50]}")
         
         if isinstance(reporte_contenido, str):
             tamanio_mb = len(reporte_contenido) / (1024 * 1024)
-            logger.error(f"  Tamaño del contenido: {tamanio_mb:.2f} MB")
-            
+            logger.error(f"  Tamaño: {tamanio_mb:.2f} MB")
             if tamanio_mb > 100:
-                logger.error("\n⚠️  El JSON MUY GRANDE puede estar truncado:")
-                logger.error("  1. Verificar si la descarga fue interrumpida")
-                logger.error("  2. Si fue truncado, intentar dividir el reporte en partes")
-                logger.error("  3. Contactar equipo de UCMDB si el problema persiste")
+                logger.error("⚠️ El JSON muy grande puede estar truncado")
         
         return ExitCodes.JSON_ERROR
     
-    logger.info("✓ JSON procesado exitosamente\n")
+    logger.info("✓ JSON procesado\n")
     
-    # Validar integridad de datos
     if not validar_integridad_json(json_data):
         logger.error("Validación de integridad falló")
         return ExitCodes.JSON_ERROR
     
-    # PASO 4: Crear carpeta
+    logger.info("\n" + "=" * 80)
     logger.info("PASO 4: CREAR DIRECTORIO DE EJECUCIÓN")
-    logger.info("-" * 80)
+    logger.info("=" * 80)
     
     carpeta_ejecucion = crear_directorio_ejecucion(ExecutionFlags.CREAR_CARPETA_EJECUCION)
     
-    # Guardar reporte JSON si está habilitado
     if ReportGenerationConfig.REPORTE_JSON:
         guardar_reporte_json(json_data, carpeta_ejecucion)
     
-    logger.info("")
+    logger.info("\n" + "=" * 80)
+    logger.info("PASO 5-6: PROCESAMIENTO Y ELIMINACIONES")
+    logger.info("=" * 80)
     
-    # PASO 5/6: Procesamiento y eliminaciones
     exit_code = procesar_reporte(json_data, carpeta_ejecucion, token)
     
-    logger.info("\n")
-    logger.info("=" * 80)
+    logger.info("\n" + "=" * 80)
     logger.info("EJECUCIÓN FINALIZADA")
     logger.info("=" * 80)
     
@@ -306,5 +241,5 @@ if __name__ == "__main__":
         logger.warning("\nEjecución cancelada por el usuario")
         sys.exit(ExitCodes.EXECUTION_ERROR)
     except Exception as e:
-        logger.exception(f"Error crítico no manejado: {e}")
+        logger.exception(f"Error crítico: {e}")
         sys.exit(ExitCodes.EXECUTION_ERROR)

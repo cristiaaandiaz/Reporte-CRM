@@ -1,11 +1,9 @@
 """
-Módulo de Operaciones UCMDB.
-
-Gestiona las operaciones de eliminación (DELETE) en UCMDB.
+Operaciones DELETE en UCMDB.
 """
 
 from typing import List, Dict, Any, Tuple, Optional
-import base64
+from pathlib import Path
 import time
 
 import requests
@@ -26,39 +24,12 @@ def ejecutar_delete_ucmdb(
     max_reintentos: int = 3,
     delay_reintento: int = 2
 ) -> Tuple[bool, str]:
-    """
-    Ejecuta DELETE en UCMDB con reintentos automáticos y backoff exponencial.
-    
-    Algoritmo de eliminación:
-    1. Prepara headers con Bearer token JWT
-    2. Realiza DELETE a la URL especificada
-    3. Valida respuesta:
-       - 200/204: Eliminación exitosa, retorna (True, "Eliminada")
-       - 404: Relación no existe, retorna (False, "No encontrada")
-       - 5xx: Error servidor, reintentos con backoff exponencial
-       - Timeout/ConnectionError: Reintentos automáticos
-    4. Backoff: espera delay_reintento * 2^(intento-1) segundos
-    5. Logging completo de intentos y resultados
-    
-    Args:
-        url: URL completa del endpoint DELETE en UCMDB
-        token: Token JWT para autenticación (Bearer token)
-        config: Configuración de UCMDB (si None, usa ucmdb_config global)
-        max_reintentos: Máximo número de reintentos (default: 3)
-        delay_reintento: Segundos base de espera entre reintentos (default: 2)
-        
-    Returns:
-        Tupla (Éxito: bool, Mensaje descriptivo: str)
-        Ej: (True, "Eliminada en UCMDB")
-            (False, "Relación no encontrada en UCMDB")
-    """
+    """Ejecuta DELETE en UCMDB con reintentos."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
     
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
+    headers = {"Authorization": f"Bearer {token}"}
     
     for intento in range(1, max_reintentos + 1):
         try:
@@ -70,48 +41,38 @@ def ejecutar_delete_ucmdb(
             )
             
             if response.status_code in [200, 204]:
-                logger.debug(f"DELETE exitoso: {response.status_code}")
-                return True, f"Eliminación exitosa (HTTP {response.status_code})"
+                return True, f"Eliminado (HTTP {response.status_code})"
             
             elif response.status_code == 404:
-                logger.warning(f"Recurso no encontrado: {url}")
-                return False, "Recurso no encontrado (HTTP 404)"
+                return False, "No encontrado (HTTP 404)"
             
             elif response.status_code in [500, 502, 503, 504]:
                 if intento < max_reintentos:
-                    espera = delay_reintento * (2 ** (intento - 1))  # Backoff exponencial
-                    logger.warning(f"Error servidor ({response.status_code}), reintentando en {espera}s (intento {intento}/{max_reintentos})")
+                    espera = delay_reintento * (2 ** (intento - 1))
+                    logger.warning(f"Error {response.status_code}, reintento en {espera}s")
                     time.sleep(espera)
                     continue
-                return False, f"Error servidor después de {max_reintentos} intentos ({response.status_code})"
+                return False, f"Error servidor después de {max_reintentos} intentos"
             
             else:
-                logger.error(f"Error HTTP {response.status_code}: {response.text[:500]}")
                 return False, f"Error HTTP {response.status_code}"
         
         except requests.exceptions.Timeout:
-            logger.warning(f"Timeout en DELETE (intento {intento}/{max_reintentos})")
             if intento < max_reintentos:
                 espera = delay_reintento * (2 ** (intento - 1))
-                logger.warning(f"Esperando {espera}s antes de reintentar...")
                 time.sleep(espera)
             if intento == max_reintentos:
                 return False, "Timeout agotado"
-            continue
         
         except requests.exceptions.ConnectionError as e:
-            logger.warning(f"Error conexión (intento {intento}/{max_reintentos}): {e}")
             if intento < max_reintentos:
                 espera = delay_reintento * (2 ** (intento - 1))
-                logger.warning(f"Esperando {espera}s antes de reintentar...")
                 time.sleep(espera)
             if intento == max_reintentos:
-                return False, f"Error de conexión: {str(e)}"
-            continue
+                return False, f"Error de conexión: {e}"
         
         except Exception as e:
-            logger.error(f"Error inesperado en DELETE: {e}")
-            return False, f"Error: {str(e)}"
+            return False, f"Error: {e}"
     
     return False, "Error desconocido"
 
@@ -123,22 +84,8 @@ def eliminar_en_ucmdb(
     config: Optional[UCMDBConfig] = None,
     modo_ejecucion: str = "simulacion",
     generar_resumen: bool = True
-) -> Optional[Any]:
-    """
-    Procesa eliminaciones en UCMDB para TODAS las relaciones normales.
-    
-    Para cada relación:
-    - SI relacion_fo = true: Elimina AMBOS ucmdbId + ucmdbid_fo (2 DELETE calls)
-    - SI relacion_fo = false: Elimina SOLO ucmdbId (1 DELETE call)
-    
-    Args:
-        token: Token JWT de autenticación UCMDB
-        inconsistencias: Lista de ALL relaciones normales
-        carpeta: Ruta para guardar resumen
-        config: Configuración de UCMDB
-        modo_ejecucion: "simulacion" o "ejecucion"
-        generar_resumen: True para generar archivo de resumen
-    """
+) -> Optional[List[Dict[str, Any]]]:
+    """Procesa eliminaciones en UCMDB para relaciones normales."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
@@ -148,17 +95,11 @@ def eliminar_en_ucmdb(
     logger.info("=" * 80)
     
     if modo_ejecucion == "ejecucion" and not token:
-        logger.error("ERROR CRÍTICO: Se requiere token para ejecución real")
+        logger.error("Se requiere token para ejecución real")
         return None
     
-    if modo_ejecucion == "ejecucion":
-        logger.warning("[EJECUCIÓN] Se eliminarán relaciones REALMENTE en UCMDB")
-    else:
-        logger.info("[SIMULACIÓN] Se mostrarán URLs sin ejecutar")
-    
-    total = len(inconsistencias)
-    logger.info(f"Total de relaciones a procesar: {total}")
-    logger.info("-" * 80)
+    logger.info(f"Modo: {'EJECUCIÓN' if modo_ejecucion == 'ejecucion' else 'SIMULACIÓN'}")
+    logger.info(f"Total de relaciones: {len(inconsistencias)}")
     
     if not inconsistencias:
         logger.info("No hay inconsistencias para procesar")
@@ -167,7 +108,7 @@ def eliminar_en_ucmdb(
     exitosas = 0
     fallidas = 0
     total_deletes = 0
-    resumen = []
+    resumen: List[Dict[str, Any]] = []
     
     for idx, item in enumerate(inconsistencias, 1):
         ucmdbid = item.get("ucmdbId", "").strip()
@@ -175,22 +116,17 @@ def eliminar_en_ucmdb(
         relacion_fo = item.get("relacion_fo", False)
         nit_end1 = item.get("nit_end1", "N/A")
         nit_end2 = item.get("nit_end2", "N/A")
-        end1id = item.get("end1Id", "N/A")
-        end2id = item.get("end2Id", "N/A")
         label_end1 = item.get("display_label_end1", "N/A")
         label_end2 = item.get("display_label_end2", "N/A")
         
         if not ucmdbid:
-            logger.warning(f"[{idx}/{total}] ucmdbId vacío, saltando")
             continue
         
-        # Mostrar resumen en formato legible
-        logger.info(f"[{idx}/{total}] DELETE - Relación: {ucmdbid}")
-        logger.info(f"  FO: {relacion_fo} ({ucmdbid_fo}) | NIT: {nit_end1} ≠ {nit_end2}")
-        logger.info(f"  End1: {label_end1} ({end1id})")
-        logger.info(f"  End2: {label_end2} ({end2id})")
+        logger.info(f"[{idx}/{len(inconsistencias)}] DELETE - {ucmdbid}")
+        logger.info(f"  FO: {relacion_fo} | NIT: {nit_end1} ≠ {nit_end2}")
+        logger.info(f"  End1: {label_end1}")
+        logger.info(f"  End2: {label_end2}")
         
-        # Lista de IDs a eliminar
         ids_a_eliminar = [ucmdbid]
         if relacion_fo and ucmdbid_fo != "N/A":
             ids_a_eliminar.append(ucmdbid_fo)
@@ -199,7 +135,7 @@ def eliminar_en_ucmdb(
             total_deletes += 1
             url = f"{config.DELETE_ENDPOINT}/{ucmdb_id}"
             
-            resultado = {
+            resultado: Dict[str, Any] = {
                 "numero": total_deletes,
                 "ucmdbId": ucmdb_id,
                 "url": url,
@@ -216,29 +152,23 @@ def eliminar_en_ucmdb(
                 
                 if exito:
                     exitosas += 1
-                    logger.info(f"  ✓ HTTP 204 OK - {ucmdb_id}")
+                    logger.info(f"  ✓ {ucmdb_id}")
                 else:
                     fallidas += 1
-                    logger.error(f"  ✗ ERROR - {ucmdb_id}: {mensaje}")
+                    logger.error(f"  ✗ {ucmdb_id}: {mensaje}")
             else:
                 resultado["estado"] = "SIMULADA"
                 logger.info(f"  [SIM] DELETE {url}")
-                # En simulación, aclarar si es el registro FO siendo eliminado
                 if relacion_fo and ucmdbid_fo != "N/A" and ucmdb_id == ucmdbid_fo:
-                    logger.info(f"       → (Este es el registro FO)")
+                    logger.info("       → (Registro FO)")
             
             resumen.append(resultado)
     
-    logger.info("-" * 80)
-    logger.info("Resumen UCMDB:")
-    logger.info(f"  Total relaciones procesadas: {total}")
-    logger.info(f"  Total DELETE requests: {total_deletes}")
-    
+    logger.info(f"Total DELETE requests: {total_deletes}")
     if modo_ejecucion == "ejecucion":
-        logger.info(f"  Exitosas: {exitosas}")
-        logger.info(f"  Fallidas: {fallidas}")
+        logger.info(f"Exitosas: {exitosas}, Fallidas: {fallidas}")
     else:
-        logger.info(f"  Simuladas: {total_deletes}")
+        logger.info(f"Simuladas: {total_deletes}")
     
     if generar_resumen:
         _guardar_resumen_ucmdb(resumen, carpeta)
@@ -246,10 +176,7 @@ def eliminar_en_ucmdb(
     return resumen
 
 
-def _guardar_resumen_ucmdb(
-    resumen: List[Dict[str, Any]],
-    carpeta: Any
-) -> Optional[Any]:
+def _guardar_resumen_ucmdb(resumen: List[Dict[str, Any]], carpeta: Any) -> Optional[Path]:
     """Guarda resumen de operaciones UCMDB."""
     from pathlib import Path
     
@@ -257,7 +184,6 @@ def _guardar_resumen_ucmdb(
         carpeta = Path(carpeta)
     
     if carpeta.name == "disabled":
-        logger.info("Guardado de resumen UCMDB deshabilitado")
         return None
     
     archivo = carpeta / "resumen_ucmdb.txt"
@@ -280,7 +206,7 @@ def _guardar_resumen_ucmdb(
         logger.info(f"Resumen UCMDB guardado: {archivo}")
         return archivo
     except IOError as e:
-        logger.error(f"Error guardando resumen UCMDB: {e}")
+        logger.error(f"Error guardando resumen: {e}")
         return None
 
 
@@ -291,46 +217,22 @@ def eliminar_relaciones_usage_de_servicecodes(
     config: Optional[UCMDBConfig] = None,
     modo_ejecucion: str = "simulacion",
     generar_resumen: bool = True
-) -> Optional[Any]:
-    """
-    Procesa eliminaciones en UCMDB para relaciones usage de servicecodes.
-    
-    Para cada relación usage:
-    - Realiza DELETE del ucmdbId
-    - Registra en archivo de resumen
-    - Si no existe relación (404), no falla (simplemente registra)
-    
-    Args:
-        token: Token JWT de autenticación UCMDB
-        relaciones_usage: Lista de relaciones usage a eliminar
-        carpeta: Ruta para guardar resumen
-        config: Configuración de UCMDB
-        modo_ejecucion: "simulacion" o "ejecucion"
-        generar_resumen: True para generar archivo de resumen
-    
-    Returns:
-        Lista de resultados de cada eliminación o None
-    """
+) -> Optional[List[Dict[str, Any]]]:
+    """Procesa eliminaciones de relaciones usage en UCMDB."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
     
-    logger.info("\n" + "=" * 80)
-    logger.info("PASO 6B: ELIMINAR RELACIONES USAGE DE SERVICECODES EN UCMDB")
+    logger.info("=" * 80)
+    logger.info("PASO 6B: ELIMINAR RELACIONES USAGE EN UCMDB")
     logger.info("=" * 80)
     
     if modo_ejecucion == "ejecucion" and not token:
-        logger.error("ERROR CRÍTICO: Se requiere token para ejecución real")
+        logger.error("Se requiere token para ejecución real")
         return None
     
-    if modo_ejecucion == "ejecucion":
-        logger.warning("[EJECUCIÓN] Se eliminarán relaciones usage REALMENTE en UCMDB")
-    else:
-        logger.info("[SIMULACIÓN] Se mostrarán URLs sin ejecutar")
-    
-    total = len(relaciones_usage)
-    logger.info(f"Total de relaciones usage a procesar: {total}")
-    logger.info("-" * 80)
+    logger.info(f"Modo: {'EJECUCIÓN' if modo_ejecucion == 'ejecucion' else 'SIMULACIÓN'}")
+    logger.info(f"Total de relaciones usage: {len(relaciones_usage)}")
     
     if not relaciones_usage:
         logger.info("No hay relaciones usage para procesar")
@@ -339,36 +241,28 @@ def eliminar_relaciones_usage_de_servicecodes(
     exitosas = 0
     fallidas = 0
     no_encontradas = 0
-    resumen = []
+    resumen: List[Dict[str, Any]] = []
     
     for idx, item in enumerate(relaciones_usage, 1):
         ucmdbid = item.get("ucmdbId", "").strip()
-        end1id = item.get("end1Id", "N/A")
-        end2id = item.get("end2Id", "N/A")
-        label_end1 = item.get("display_label_end1", "N/A")
-        label_end2 = item.get("display_label_end2", "N/A")
-        rel_type = item.get("type", "usage")
         
         if not ucmdbid:
-            logger.warning(f"[{idx}/{total}] ucmdbId vacío, saltando")
             continue
         
-        # Mostrar resumen en formato legible
-        logger.info(f"[{idx}/{total}] DELETE - Relación usage: {ucmdbid}")
-        logger.info(f"  Tipo: {rel_type}")
-        logger.info(f"  Aplicación: {label_end1} ({end1id})")
-        logger.info(f"  Servicecode: {label_end2} ({end2id})")
+        logger.info(f"[{idx}/{len(relaciones_usage)}] DELETE - {ucmdbid}")
+        logger.info(f"  App: {item.get('display_label_end1', 'N/A')}")
+        logger.info(f"  Servicecode: {item.get('display_label_end2', 'N/A')}")
         
         url = f"{config.DELETE_ENDPOINT}/{ucmdbid}"
         
-        resultado = {
+        resultado: Dict[str, Any] = {
             "numero": idx,
             "ucmdbId": ucmdbid,
             "url": url,
             "metodo": "DELETE",
-            "tipo_relacion": rel_type,
-            "end1_label": label_end1,
-            "end2_label": label_end2,
+            "tipo_relacion": item.get("type", "usage"),
+            "end1_label": item.get("display_label_end1", "N/A"),
+            "end2_label": item.get("display_label_end2", "N/A"),
             "modo": "EJECUCION" if modo_ejecucion == "ejecucion" else "SIMULACION",
             "estado": "PENDIENTE",
             "detalles": ""
@@ -379,19 +273,16 @@ def eliminar_relaciones_usage_de_servicecodes(
             
             if exito:
                 resultado["estado"] = "EXITOSA"
-                resultado["detalles"] = mensaje
                 exitosas += 1
-                logger.info(f"  ✓ HTTP 204 OK - {ucmdbid}")
+                logger.info(f"  ✓ {ucmdbid}")
             else:
-                # Distinguir si no existe (404) del resto de errores
                 if "404" in mensaje:
                     resultado["estado"] = "NO_ENCONTRADA"
                     no_encontradas += 1
-                    logger.warning(f"  ⚠ ADVERTENCIA - Relación no encontrada (404): {ucmdbid}")
                 else:
                     resultado["estado"] = "FALLIDA"
                     fallidas += 1
-                    logger.error(f"  ✗ ERROR - {ucmdbid}: {mensaje}")
+                logger.error(f"  ✗ {ucmdbid}: {mensaje}")
                 resultado["detalles"] = mensaje
         else:
             resultado["estado"] = "SIMULADA"
@@ -399,16 +290,11 @@ def eliminar_relaciones_usage_de_servicecodes(
         
         resumen.append(resultado)
     
-    logger.info("-" * 80)
-    logger.info("Resumen eliminación usage:")
-    logger.info(f"  Total relaciones procesadas: {total}")
-    
+    logger.info(f"Total procesadas: {len(relaciones_usage)}")
     if modo_ejecucion == "ejecucion":
-        logger.info(f"  Exitosas: {exitosas}")
-        logger.info(f"  Fallidas: {fallidas}")
-        logger.info(f"  No encontradas (404): {no_encontradas}")
+        logger.info(f"Exitosas: {exitosas}, Fallidas: {fallidas}, No encontradas: {no_encontradas}")
     else:
-        logger.info(f"  Simuladas: {total}")
+        logger.info(f"Simuladas: {len(relaciones_usage)}")
     
     if generar_resumen:
         _guardar_resumen_usage(resumen, carpeta)
@@ -416,10 +302,7 @@ def eliminar_relaciones_usage_de_servicecodes(
     return resumen
 
 
-def _guardar_resumen_usage(
-    resumen: List[Dict[str, Any]],
-    carpeta: Any
-) -> Optional[Any]:
+def _guardar_resumen_usage(resumen: List[Dict[str, Any]], carpeta: Any) -> Optional[Path]:
     """Guarda resumen de operaciones de eliminación usage."""
     from pathlib import Path
     
@@ -427,7 +310,6 @@ def _guardar_resumen_usage(
         carpeta = Path(carpeta)
     
     if carpeta.name == "disabled":
-        logger.info("Guardado de resumen usage deshabilitado")
         return None
     
     archivo = carpeta / "resumen_eliminacion_usage.txt"
@@ -441,7 +323,7 @@ def _guardar_resumen_usage(
             for item in resumen:
                 f.write(f"[{item['numero']}] {item['metodo']} {item['ucmdbId']}\n")
                 f.write(f"  URL: {item['url']}\n")
-                f.write(f"  Tipo relación: {item.get('tipo_relacion', 'N/A')}\n")
+                f.write(f"  Tipo: {item.get('tipo_relacion', 'N/A')}\n")
                 f.write(f"  Aplicación: {item.get('end1_label', 'N/A')}\n")
                 f.write(f"  Servicecode: {item.get('end2_label', 'N/A')}\n")
                 f.write(f"  Modo: {item['modo']}\n")
@@ -450,8 +332,8 @@ def _guardar_resumen_usage(
                     f.write(f"  Detalle: {item['detalles']}\n")
                 f.write("\n")
         
-        logger.info(f"Resumen eliminación usage guardado: {archivo}")
+        logger.info(f"Resumen usage guardado: {archivo}")
         return archivo
     except IOError as e:
-        logger.error(f"Error guardando resumen usage: {e}")
+        logger.error(f"Error guardando resumen: {e}")
         return None

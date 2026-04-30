@@ -1,8 +1,5 @@
 """
-Módulo de Generación y Procesamiento de Reportes.
-
-Gestiona la consulta del reporte desde UCMDB y proporciona
-funciones para filtrar y validar información sobre NITs.
+Consultas a UCMDB API y validación de NITs.
 """
 
 import json
@@ -19,18 +16,15 @@ from urllib3.util.retry import Retry as Urllib3Retry
 from .config import UCMDBConfig, ReportConfig, VERIFY_SSL
 from .logger_config import obtener_logger
 
-# Desactivar advertencias SSL
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = obtener_logger(__name__)
 
 
-# ==================== CONFIGURACIÓN LOCAL ====================
 class HTTPAdapterWithSocketKeepalive(HTTPAdapter):
-    """HTTPAdapter que configura socket keep-alive para conexiones largas."""
+    """HTTPAdapter con socket keep-alive para conexiones largas."""
     
     def init_poolmanager(self, *args, **kwargs):
-        """Inicializa el pool manager con opciones de keep-alive."""
         kwargs["socket_options"] = [
             (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
             (socket.IPPROTO_TCP, socket.TCP_NODELAY, 1),
@@ -48,50 +42,30 @@ class ReportError(Exception):
     pass
 
 
-# ==================== FUNCIÓN PRINCIPAL DE CONSULTA ====================
-
 def consultar_reporte_ucmdb(
     token: str,
     config: Optional[UCMDBConfig] = None,
-    timeout_override: Optional[tuple] = None,
-    reintentos: int = None
+    timeout_override: Optional[tuple[int, int]] = None,
+    reintentos: Optional[int] = None
 ) -> Optional[str]:
-    """
-    Consulta el reporte JSON desde UCMDB.
-    
-    Args:
-        token: Token JWT de autenticación
-        config: Configuración de UCMDB (usa global si no se proporciona)
-        timeout_override: Tupla (connect_timeout, read_timeout) personalizada
-        reintentos: Número de reintentos (usa config.MAX_RETRIES si no se proporciona)
-    
-    Returns:
-        String con el contenido JSON del reporte o None si falla
-        
-    Raises:
-        ReportTimeoutError: Si se agota el límite de tiempo
-        ReportError: Si hay errores en la consulta
-    """
+    """Consulta el reporte JSON desde UCMDB."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
     
-    if reintentos is None:
-        reintentos = config.MAX_RETRIES
+    reintentos = reintentos or config.MAX_RETRIES
     
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": config.CONTENT_TYPE,
         "Connection": "keep-alive",
-        "Keep-Alive": "timeout=600, max=100"
     }
-
+    
     timeouts = timeout_override or (config.CONNECT_TIMEOUT, config.READ_TIMEOUT)
-
-    logger.info(f"Consultando reporte UCMDB: {ReportConfig.REPORT_NAME}")
-    logger.info(f"Configuración de timeout: Conexión={timeouts[0]}s, Lectura={timeouts[1]}s")
-
-    # Crear sesión FUERA del loop para reutilizarla en reintentos
+    
+    logger.info(f"Consultando reporte: {ReportConfig.REPORT_NAME}")
+    logger.info(f"Timeout: conexión={timeouts[0]}s, lectura={timeouts[1]}s")
+    
     session = requests.Session()
     retry_strategy = Urllib3Retry(
         total=3,
@@ -101,17 +75,16 @@ def consultar_reporte_ucmdb(
     adapter = HTTPAdapterWithSocketKeepalive(max_retries=retry_strategy)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-
+    
     for intento in range(1, reintentos + 1):
         try:
             if intento > 1:
-                logger.warning(f"Reintentando consulta de reporte (intento {intento}/{reintentos})...")
+                logger.warning(f"Reintentando (intento {intento}/{reintentos})...")
                 time.sleep(config.RETRY_DELAY)
-
-            logger.info(f"Enviando petición al servidor UCMDB (intento {intento}/{reintentos})...")
-
-            inicio = time.time()
             
+            logger.info(f"Enviando petición (intento {intento}/{reintentos})...")
+            
+            inicio = time.time()
             response = session.post(
                 config.BASE_URL,
                 data=ReportConfig.REPORT_NAME,
@@ -120,17 +93,17 @@ def consultar_reporte_ucmdb(
                 timeout=timeouts,
                 stream=True
             )
-
+            
             duracion = time.time() - inicio
-            logger.info(f"Respuesta recibida en {duracion:.2f} segundos")
-
+            logger.info(f"Respuesta en {duracion:.2f} segundos")
+            
             if response.status_code == 200:
-                # Descargar en chunks para archivos grandes
                 buffer = BytesIO()
-                chunk_size = 10 * 1024 * 1024  # 10MB chunks
+                chunk_size = 10 * 1024 * 1024  # 10MB
                 bytes_recibidos = 0
-                progreso_intervalo = 50 * 1024 * 1024  # Log cada 50MB
+                progreso_intervalo = 50 * 1024 * 1024
                 ultimo_log = 0
+                
                 try:
                     for chunk in response.iter_content(chunk_size=chunk_size, decode_unicode=False):
                         if chunk:
@@ -139,206 +112,70 @@ def consultar_reporte_ucmdb(
                             if bytes_recibidos - ultimo_log >= progreso_intervalo:
                                 logger.info(f"Descargados {bytes_recibidos / (1024*1024):.2f} MB...")
                                 ultimo_log = bytes_recibidos
-                except (requests.exceptions.ChunkedEncodingError, 
+                except (requests.exceptions.ChunkedEncodingError,
                         requests.exceptions.ConnectionError,
                         urllib3.exceptions.IncompleteRead) as e:
-                    error_type = type(e).__name__
-                    logger.critical(f"❌ CRÍTICO: Descarga interrumpida por {error_type}")
-                    logger.critical(f"   Detalle: {str(e)}")
-                    logger.critical(f"   Bytes descargados: {bytes_recibidos}")
-                    logger.critical(f"   Causa probable: El servidor UCMDB cortó la conexión después de ~{bytes_recibidos/(1024*1024):.0f} MB")
-                    logger.critical(f"   ")
-                    logger.critical(f"   ⚠️  SOLUCIÓN REQUERIDA:")
-                    logger.critical(f"   1. El servidor UCMDB tiene límite de tiempo/tamaño de conexión")
-                    logger.critical(f"   2. Contactar al equipo de UCMDB/Infraestructura para:")
-                    logger.critical(f"      - Aumentar timeout de conexión HTTP en UCMDB")
-                    logger.critical(f"      - Aumentar límite máximo de transferencia de datos")
-                    logger.critical(f"      - Revisar si hay firewall/proxy intermedio limitando conexiones")
-                    logger.critical(f"   3. Alternativa: Solicitar que el reporte se divida en partes")
-                    
-                    contenido = buffer.getvalue()
-                    if contenido and bytes_recibidos > (100 * 1024 * 1024):
-                        logger.warning(f"Intentando procesar datos parciales descargados...")
-                        try:
-                            contenido_str = contenido.decode('utf-8', errors='replace')
-                            logger.info(f"Tamaño de datos truncados: {len(contenido_str)} caracteres")
-                            
-                            patrones = ['},', '],']
-                            posiciones = [(contenido_str.rfind(p), p) for p in patrones]
-                            posiciones_validas = [(pos, pat) for pos, pat in posiciones if pos > 0]
-                            
-                            if posiciones_validas:
-                                mejor_posicion, mejor_patron = max(posiciones_validas, key=lambda x: x[0])
-                                contenido_str = contenido_str[:mejor_posicion + len(mejor_patron)]
-                                logger.info(f"Truncado en patrón '{mejor_patron}' en posición {mejor_posicion}")
-                            else:
-                                ultimo_close = contenido_str.rfind('}')
-                                if ultimo_close > 0:
-                                    contenido_str = contenido_str[:ultimo_close + 1]
-                                    logger.info(f"Truncado en último }} en posición {ultimo_close}")
-                            
-                            contenido_str = contenido_str.rstrip(', ')
-                            
-                            open_brackets = contenido_str.count('[')
-                            close_brackets = contenido_str.count(']')
-                            open_braces = contenido_str.count('{')
-                            close_braces = contenido_str.count('}')
-                            
-                            logger.info(f"Conteo: [ {open_brackets} vs ] {close_brackets}, {{ {open_braces} vs }} {close_braces}")
-                            
-                            if open_braces == 0 or open_brackets == 0:
-                                logger.error("ERROR: JSON no contiene estructura mínima válida")
-                                raise ValueError("JSON truncado sin estructura mínima")
-                            
-                            cierres_necesarios = (']' * (open_brackets - close_brackets)) + ('}' * (open_braces - close_braces))
-                            
-                            # ⚠️ VALIDACIÓN: Solo cerrar si estructura es semánticamente recuperable
-                            # Rechazar si falta más del 5% de estructura
-                            total_caracteres = len(contenido_str)
-                            if cierres_necesarios and len(cierres_necesarios) > total_caracteres * 0.05:
-                                logger.critical(f"❌ JSON CORRUPTO: Necesita cerrar {len(cierres_necesarios)} caracteres (>{total_caracteres*0.05:.0f} del total)")
-                                logger.critical("   Riesgo: Estructura semánticamente irrecuperable")
-                                raise ValueError("JSON truncado con pérdida estructural >5%")
-                            
-                            if cierres_necesarios:
-                                contenido_str += cierres_necesarios
-                                logger.warning(f"⚠️  JSON cerrado artificialmente: +{len(cierres_necesarios)} caracteres")
-                                logger.warning("   Validar datos antes de procesar (posible corrupción semántica)")
-                            
-                            contenido = contenido_str.encode('utf-8')
-                            logger.info("JSON truncado recuperado y cerrado (con validación de seguridad)")
-                        except Exception as fix_error:
-                            logger.error(f"Error al recuperar JSON truncado: {type(fix_error).__name__}: {fix_error}")
-                            logger.warning("El JSON truncado no puede ser procesado de forma segura")
-                    else:
-                        logger.critical("ERROR: No se descargaron suficientes datos. Abortar ejecución.")
-                        raise ReportError(f"Descarga interrumpida sin datos suficientes: {str(e)}")
+                    logger.critical(f"Descarga interrumpida: {type(e).__name__}")
+                    logger.critical(f"Bytes descargados: {bytes_recibidos}")
+                    raise ReportError(f"Descarga interrumpida: {e}")
                 
                 contenido = buffer.getvalue()
                 tamanio_mb = len(contenido) / (1024 * 1024)
-                logger.info(f"Reporte obtenido exitosamente ({tamanio_mb:.2f} MB de datos)")
+                logger.info(f"Reporte obtenido ({tamanio_mb:.2f} MB)")
                 return contenido.decode('utf-8', errors='replace')
+            
             else:
-                response_text = response.text or ""
-                mensaje = f"Error al consultar el reporte. Código HTTP: {response.status_code}"
-                logger.error(mensaje)
-                logger.error(f"Cuerpo de la respuesta: {response_text[:2000]}")
-
-                if 400 <= response.status_code < 500:
-                    logger.info("Intentando solicitud alternativa con JSON para diagnóstico...")
-                    try:
-                        alt_headers = headers.copy()
-                        alt_headers["Content-Type"] = "application/json"
-                        alt_payload = {"reportName": ReportConfig.REPORT_NAME}
-                        alt_resp = requests.post(
-                            config.BASE_URL,
-                            json=alt_payload,
-                            headers=alt_headers,
-                            verify=VERIFY_SSL,
-                            timeout=timeouts,
-                        )
-                        logger.error(f"Alternativa: status {alt_resp.status_code}")
-                        logger.error(f"Alternativa cuerpo: {alt_resp.text[:2000]}")
-                        if alt_resp.status_code == 200:
-                            return alt_resp.text
-                    except Exception as e:
-                        logger.exception(f"Fallo intento alternativo: {e}")
-
-                    raise ReportError(f"{mensaje} - {response_text}")
-
-                if intento == reintentos:
-                    raise ReportError(f"{mensaje} - {response_text}")
-
-                logger.warning("Error del servidor, reintentando...")
-                continue
-
+                logger.error(f"Error HTTP: {response.status_code}")
+                logger.error(f"Respuesta: {response.text[:500]}")
+                raise ReportError(f"HTTP {response.status_code}")
+        
         except requests.exceptions.Timeout as e:
-            logger.warning(f"Timeout al conectar con UCMDB después de {timeouts[0]}s (conexión) / {timeouts[1]}s (lectura)")
+            logger.warning(f"Timeout (intento {intento}/{reintentos})")
             if intento == reintentos:
-                mensaje = (
-                    f"Timeout agotado después de {reintentos} intentos. "
-                    f"El servidor UCMDB está respondiendo lentamente o la conexión es inestable. "
-                    f"Timeout configurado: {timeouts[0]}s (conexión), {timeouts[1]}s (lectura). "
-                    f"Considere: "
-                    f"1) Aumentar CONNECT_TIMEOUT a 120s, "
-                    f"2) Verificar conectividad con {config.BASE_URL}, "
-                    f"3) Revisar si hay firewall bloqueando la conexión."
-                )
-                logger.error(mensaje)
-                raise ReportTimeoutError(mensaje)
-            logger.info(f"Reintentando en {config.RETRY_DELAY} segundos ({intento}/{reintentos})...")
-            continue
-
+                raise ReportTimeoutError(f"Timeout después de {reintentos} intentos")
+        
         except requests.exceptions.ConnectionError as e:
-            logger.error(f"Error de conexión con UCMDB: {str(e)}")
+            logger.error(f"Error de conexión: {e}")
             if intento == reintentos:
-                raise ReportError(f"Error de conexión: {str(e)}")
-            logger.info(f"Reintentando en {config.RETRY_DELAY} segundos...")
-            continue
-
+                raise ReportError(f"Error de conexión: {e}")
+        
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error en la petición: {str(e)}")
+            logger.error(f"Error en petición: {e}")
             if intento == reintentos:
-                raise ReportError(f"Error de petición: {str(e)}")
-            logger.info(f"Reintentando en {config.RETRY_DELAY} segundos...")
-            continue
-
+                raise ReportError(f"Error de petición: {e}")
+    
     return None
 
-
-# ==================== FUNCIONES DE FILTRADO Y VALIDACIÓN ====================
 
 def filtrar_cis_por_tipo_servicecodes(
     json_data: Dict[str, Any],
     config: Optional[UCMDBConfig] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Filtra los CIs (Configuration Items) por tipo específico.
-    
-    Args:
-        json_data: Datos JSON del reporte
-        config: Configuración de UCMDB (usa global si no se proporciona)
-    
-    Returns:
-        Lista de CIs filtrados
-    """
+    """Filtra los CIs por tipo específico."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
     
     cis = json_data.get("cis", [])
-
+    
     if not isinstance(cis, list):
-        logger.warning("El contenido de 'cis' no es una lista válida")
+        logger.warning("'cis' no es una lista válida")
         return []
-
+    
     nodos_filtrados = [
         obj for obj in cis
         if obj.get("type") == config.TARGET_NODE_TYPE
     ]
-
-    logger.info(
-        f"Filtrados {len(nodos_filtrados)} nodos de tipo '{config.TARGET_NODE_TYPE}' "
-        f"de un total de {len(cis)} nodos"
-    )
+    
+    logger.info(f"Filtrados {len(nodos_filtrados)} nodos de tipo '{config.TARGET_NODE_TYPE}'")
     return nodos_filtrados
-
 
 
 def validar_nit_en_relaciones_invertidas(
     json_data: Dict[str, Any],
     config: Optional[UCMDBConfig] = None
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
-    """
-    Valida la consistencia de NITs en relaciones entre sistemas.
-    
-    Args:
-        json_data: Datos JSON del reporte
-        config: Configuración de UCMDB (usa global si no se proporciona)
-    
-    Returns:
-        Tupla con (inconsistencias_normales, inconsistencias_particulares)
-    """
+    """Valida la consistencia de NITs en relaciones."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
@@ -346,91 +183,68 @@ def validar_nit_en_relaciones_invertidas(
     if not isinstance(json_data, dict):
         logger.error("json_data debe ser un diccionario")
         return [], []
-
+    
     cis = json_data.get("cis", [])
     relaciones = json_data.get("relations", [])
-
+    
     if not cis or not relaciones:
         logger.warning("No hay CIs o relaciones para procesar")
         return [], []
-
-    # Crear índices eficientes
-    nodos_por_id: Dict[str, Dict[str, Any]] = {}
-    for obj in cis:
-        ucmdb_id = obj.get("ucmdbId")
-        if ucmdb_id:
-            nodos_por_id[ucmdb_id] = obj
-            if "_properties_cache" not in obj:
-                obj["_properties_cache"] = obj.get("properties", {})
-
+    
+    nodos_por_id: Dict[str, Dict[str, Any]] = {
+        obj.get("ucmdbId"): obj for obj in cis if obj.get("ucmdbId")
+    }
+    
     inconsistencias_normales: List[Dict[str, str]] = []
     inconsistencias_particulares: List[Dict[str, str]] = []
     nodos_faltantes = 0
     nits_faltantes = 0
     procesadas = 0
-
-    progreso_cada = max(len(relaciones) // 5, 1)
-
+    
     for idx, rel in enumerate(relaciones, 1):
-        if idx % progreso_cada == 0:
+        if idx % max(len(relaciones) // 5, 1) == 0:
             porcentaje = (idx / len(relaciones)) * 100
-            logger.info(
-                f"[{porcentaje:.0f}%] {idx}/{len(relaciones)} | "
-                f"Normales: {len(inconsistencias_normales)}, Particulares: {len(inconsistencias_particulares)}"
-            )
-
-        rel_id = rel.get("ucmdbId")
+            logger.info(f"[{porcentaje:.0f}%] {idx}/{len(relaciones)}")
+        
         end1_id = rel.get("end1Id")
         end2_id = rel.get("end2Id")
-
+        
         nodo_end1 = nodos_por_id.get(end1_id)
         nodo_end2 = nodos_por_id.get(end2_id)
-
+        
         if not (nodo_end1 and nodo_end2):
             nodos_faltantes += 1
             continue
-
-        props1 = nodo_end1.get("_properties_cache", nodo_end1.get("properties", {}))
-        props2 = nodo_end2.get("_properties_cache", nodo_end2.get("properties", {}))
+        
+        props1 = nodo_end1.get("properties", {})
+        props2 = nodo_end2.get("properties", {})
         
         nit_end1 = props1.get(config.NIT_FIELD_END1)
         nit_end2 = props2.get(config.NIT_FIELD_END2)
-
+        
         if nit_end1 is None or nit_end2 is None:
             nits_faltantes += 1
             continue
-
+        
         nit_end1_norm = nit_end1.strip()
         nit_end2_norm = nit_end2.strip()
-
+        
         if nit_end1_norm != nit_end2_norm:
-            display_label_end1 = props1.get("display_label", "N/A")
-            display_label_end2 = props2.get("display_label", "N/A")
-            
             inconsistencia = {
-                "ucmdbId": rel_id,
+                "ucmdbId": rel.get("ucmdbId"),
                 "nit_end1": nit_end1_norm,
                 "nit_end2": nit_end2_norm,
                 "end1Id": end1_id,
                 "end2Id": end2_id,
-                "display_label_end1": display_label_end1,
-                "display_label_end2": display_label_end2
+                "display_label_end1": props1.get("display_label", "N/A"),
+                "display_label_end2": props2.get("display_label", "N/A")
             }
-            
-            # Todas las diferencias de NITs se eliminan (sin excepciones)
             inconsistencias_normales.append(inconsistencia)
-
+        
         procesadas += 1
-
-    logger.info("=" * 60)
-    logger.info("Resumen de validación de NITs:")
-    logger.info(f"  Total de relaciones procesadas: {procesadas}")
-    logger.info(f"  Inconsistencias a eliminar (todas las diferencias de NITs): {len(inconsistencias_normales)}")
-    logger.info(f"  Nodos faltantes: {nodos_faltantes}")
-    logger.info(f"  NITs faltantes: {nits_faltantes}")
-    logger.info("=" * 60)
-
-    # Retorna lista vacía para inconsistencias_particulares (ya no se generan)
+    
+    logger.info(f"Procesadas: {procesadas}, Inconsistencias: {len(inconsistencias_normales)}")
+    
     return inconsistencias_normales, inconsistencias_particulares
 
 
@@ -438,40 +252,12 @@ def validar_relaciones_usage_de_servicecodes(
     json_data: Dict[str, Any],
     config: Optional[UCMDBConfig] = None
 ) -> List[Dict[str, Any]]:
-    """
-    Valida y obtiene relaciones de tipo 'usage' vinculadas a servicecodes.
-    
-    Algoritmo:
-    1. Filtra CIs de tipo 'clr_onyxservicecodes'
-    2. Para cada servicecode, busca relaciones donde:
-       - end2Id = ucmdbId del servicecode
-       - type = 'usage' (case-insensitive)
-    3. Valida que end1Id sea de tipo 'business_application'
-    4. Si cumple condiciones, agrega a lista de relaciones a eliminar
-    5. Si no existe relación, no hace nada (retorna lista_vacía)
-    
-    Args:
-        json_data: Datos JSON completos del reporte
-        config: Configuración de UCMDB (usa global si no se proporciona)
-    
-    Returns:
-        Lista de relaciones usage a eliminar con estructura:
-        {
-            "ucmdbId": "id_relacion",
-            "end1Id": "id_business_app",
-            "end2Id": "id_servicecode",
-            "type": "usage",
-            "display_label_end1": "nombre_app",
-            "display_label_end2": "nombre_servicecode",
-            "ci_type_end1": "business_application",
-            "ci_type_end2": "clr_onyxservicecodes"
-        }
-    """
+    """Valida relaciones de tipo 'usage' vinculadas a servicecodes."""
     if config is None:
         from .config import ucmdb_config
         config = ucmdb_config
     
-    logger.info("\n" + "=" * 80)
+    logger.info("=" * 80)
     logger.info("PASO 5.1: VALIDAR RELACIONES USAGE DE SERVICECODES")
     logger.info("=" * 80)
     
@@ -486,80 +272,47 @@ def validar_relaciones_usage_de_servicecodes(
         logger.warning("No hay CIs o relaciones para procesar")
         return []
     
-    # Crear índices eficientes
-    cis_por_id: Dict[str, Dict[str, Any]] = {}
-    servicecodes: List[Dict[str, Any]] = []
+    cis_por_id: Dict[str, Dict[str, Any]] = {
+        ci.get("ucmdbId"): ci for ci in cis if ci.get("ucmdbId")
+    }
+    servicecodes = [ci for ci in cis if ci.get("type") == "clr_onyxservicecodes"]
     
-    for ci in cis:
-        ucmdb_id = ci.get("ucmdbId")
-        if ucmdb_id:
-            cis_por_id[ucmdb_id] = ci
-            # Filtrar servicecodes
-            if ci.get("type") == "clr_onyxservicecodes":
-                servicecodes.append(ci)
+    logger.info(f"CIs indexados: {len(cis_por_id)}, Servicecodes: {len(servicecodes)}")
     
-    logger.info(f"\n[INDEXACION]")
-    logger.info(f"  CIs totales indexados:        {len(cis_por_id):>6}")
-    logger.info(f"  Servicecodes encontrados:     {len(servicecodes):>6}")
-    
-    # Crear índice de relaciones por end2Id y tipo usage
     relaciones_usage_por_end2: Dict[str, List[Dict[str, Any]]] = {}
-    
     for rel in relaciones:
         rel_type = rel.get("type", "").lower()
         if rel_type == "usage":
             end2id = rel.get("end2Id")
             if end2id:
-                if end2id not in relaciones_usage_por_end2:
-                    relaciones_usage_por_end2[end2id] = []
-                relaciones_usage_por_end2[end2id].append(rel)
+                relaciones_usage_por_end2.setdefault(end2id, []).append(rel)
     
-    total_usage_rels = sum(len(rels) for rels in relaciones_usage_por_end2.values())
-    logger.info(f"  Relaciones 'usage' indexadas: {total_usage_rels:>6}")
-    
-    # Validar relaciones usage para cada servicecode
-    logger.info(f"\n[PROCESAMIENTO]")
     relaciones_a_eliminar: List[Dict[str, Any]] = []
-    servicecodes_procesados = 0
-    relaciones_validadas = 0
-    relaciones_rechazadas = 0
     
     for servicecode in servicecodes:
         servicecode_id = servicecode.get("ucmdbId")
         servicecode_label = servicecode.get("properties", {}).get("display_label", "N/A")
         
-        servicecodes_procesados += 1
-        
-        # Buscar relaciones usage con este servicecode como end2
         relaciones_usage = relaciones_usage_por_end2.get(servicecode_id, [])
         
         if not relaciones_usage:
-            logger.debug(f"  [{servicecodes_procesados}] {servicecode_label:<40} -> SIN RELACIONES USAGE")
             continue
         
         for rel_usage in relaciones_usage:
             end1id = rel_usage.get("end1Id")
             rel_id = rel_usage.get("ucmdbId")
             
-            # Buscar CI en end1Id
             ci_end1 = cis_por_id.get(end1id)
-            
             if not ci_end1:
-                logger.warning(f"[{servicecodes_procesados}] Relación {rel_id}: end1Id '{end1id}' no encontrado en CIs")
-                relaciones_rechazadas += 1
                 continue
             
-            # Validar que sea business_application
             ci_type = ci_end1.get("type")
             if ci_type != "business_application":
-                logger.debug(f"[{servicecodes_procesados}] Relación {rel_id}: end1Id es '{ci_type}' (no es business_application)")
-                relaciones_rechazadas += 1
                 continue
             
-            # Relación válida para eliminar
             end1_label = ci_end1.get("properties", {}).get("display_label", "N/A")
             
-            relacion_valida = {
+            relaciones_a_eliminar.append({
                 "ucmdbId": rel_id,
                 "end1Id": end1id,
                 "end2Id": servicecode_id,
@@ -568,109 +321,7 @@ def validar_relaciones_usage_de_servicecodes(
                 "display_label_end2": servicecode_label,
                 "ci_type_end1": "business_application",
                 "ci_type_end2": "clr_onyxservicecodes"
-            }
-            
-            relaciones_a_eliminar.append(relacion_valida)
-            relaciones_validadas += 1
-            
-            logger.debug(f"[✓] Relación validada: {rel_id}")
-            logger.debug(f"     App: {end1_label} -> Servicecode: {servicecode_label}")
+            })
     
-    logger.info("=" * 80)
-    logger.info("Resumen de validación de relaciones usage:")
-    logger.info(f"  Servicecodes procesados: {servicecodes_procesados}")
-    logger.info(f"  Relaciones usage encontradas: {sum(len(rels) for rels in relaciones_usage_por_end2.values())}")
-    logger.info(f"  Relaciones validadas (para eliminar): {relaciones_validadas}")
-    logger.info(f"  Relaciones rechazadas: {relaciones_rechazadas}")
-    logger.info("=" * 80)
-    
+    logger.info(f"Relaciones usage a eliminar: {len(relaciones_a_eliminar)}")
     return relaciones_a_eliminar
-
-
-def obtener_todas_relaciones_ownership_para_itsm(
-    json_data: Dict[str, Any],
-    config: Optional[UCMDBConfig] = None
-) -> List[Dict[str, Any]]:
-    """
-    Extrae TODAS las relaciones ownership entre CRM y Servicecodes para procesamiento en ITSM.
-    
-    No requiere inconsistencias de NIT. Busca todas las relaciones válidas donde:
-    1. Tipo de relación: ownership
-    2. End1: clr_onyxcrm (tiene clr_onyxdb_company_nit)
-    3. End2: clr_onyxservicecodes (tiene clr_onyxdb_companynit)
-    
-    Args:
-        json_data: Datos JSON del reporte
-        config: Configuración de UCMDB
-    
-    Returns:
-        Lista de relaciones enriquecidas con información de NITs y CIs
-    """
-    if config is None:
-        from .config import ucmdb_config
-        config = ucmdb_config
-    
-    cis = json_data.get("cis", [])
-    relaciones = json_data.get("relations", [])
-    
-    if not cis or not relaciones:
-        logger.warning("No hay CIs o relaciones para procesar")
-        return []
-    
-    # Crear índices
-    ci_by_id = {ci.get("ucmdbId"): ci for ci in cis if ci.get("ucmdbId")}
-    
-    logger.info("=" * 80)
-    logger.info("PASO 5.2: OBTENER TODAS LAS RELACIONES OWNERSHIP PARA ITSM")
-    logger.info("=" * 80)
-    
-    relaciones_itsm = []
-    
-    for rel in relaciones:
-        rel_type = rel.get("type", "").lower()
-        
-        # Solo procesar relaciones ownership
-        if rel_type != "ownership":
-            continue
-        
-        end1_id = rel.get("end1Id")
-        end2_id = rel.get("end2Id")
-        
-        end1 = ci_by_id.get(end1_id)
-        end2 = ci_by_id.get(end2_id)
-        
-        if not (end1 and end2):
-            continue
-        
-        end1_type = end1.get("type", "")
-        end2_type = end2.get("type", "")
-        
-        # Filtrar: End1 debe ser CRM, End2 debe ser Servicecode
-        if end1_type != "clr_onyxcrm" or end2_type != "clr_onyxservicecodes":
-            continue
-        
-        props1 = end1.get("properties", {})
-        props2 = end2.get("properties", {})
-        
-        nit_end1 = props1.get("clr_onyxdb_company_nit", "N/A").strip()
-        nit_end2 = props2.get("clr_onyxdb_companynit", "N/A").strip()
-        
-        # Crear entrada enriquecida
-        rel_enriquecida = {
-            "ucmdbId": rel.get("ucmdbId"),
-            "end1Id": end1_id,
-            "end2Id": end2_id,
-            "nit_end1": nit_end1,
-            "nit_end2": nit_end2,
-            "display_label_end1": props1.get("display_label", "N/A"),
-            "display_label_end2": props2.get("display_label", "N/A"),
-            "relacion_fo": False,  # Para compatibilidad con procesamiento existente
-            "ucmdbid_fo": "N/A"
-        }
-        
-        relaciones_itsm.append(rel_enriquecida)
-    
-    logger.info(f"Relaciones ownership encontradas: {len(relaciones_itsm)}")
-    logger.info("=" * 80)
-    
-    return relaciones_itsm

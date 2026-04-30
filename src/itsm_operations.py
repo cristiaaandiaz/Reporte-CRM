@@ -1,17 +1,9 @@
 """
-Módulo de Operaciones ITSM.
-
-Gestiona las operaciones de actualización (PUT) en ITSM para marcar
-relaciones como 'Removed'.
-
-Flujo:
-    1. GET /rest/Relationships?query=ChildCIs="<end2_id>"&view=expand
-       └─> Obtiene ParentCI de la relación
-    2. PUT /rest/cirelationship1to1s/{ParentCI}/{end2_id}
-       └─> Marca relación como "Removed"
+Operaciones PUT en ITSM para marcar relaciones como 'Removed'.
 """
 
 from typing import List, Dict, Any, Tuple, Optional
+from pathlib import Path
 from urllib.parse import quote
 import base64
 import time
@@ -33,53 +25,22 @@ def consultar_parent_ci_en_itsm(
     max_reintentos: int = 3,
     delay_reintento: int = 2
 ) -> Tuple[Optional[str], str]:
-    """
-    Consulta ITSM para obtener el ParentCI de una relación usando su ChildCI (End2).
-    
-    Algoritmo de reintento exponencial:
-    1. Intenta GET /rest/Relationships?query=ChildCIs="<end2_id>"&view=expand
-    2. Si 200 OK:
-       a. Extrae ParentCI del JSON (content[0].Relationship.ParentCI)
-       b. Retorna (ParentCI, "ParentCI encontrado")
-    3. Si 404: Relación no existe
-    4. Si 5xx (error servidor):
-       a. Reintentos: espera 2^(intento-1) segundos
-       b. Mantiene conteo de intentos
-       c. Retorna error si se agotan intentos
-    5. Si ConnectionError/Timeout:
-       a. Similar a 5xx con reintentos automáticos
-       b. Registra intentos en log
-    
-    GET: /rest/Relationships?query=ChildCIs="<end2_id>"&view=expand
-    
-    Args:
-        end2_id: ID del ChildCI (End2)
-        config: Configuración de ITSM
-        max_reintentos: Máximo número de reintentos (default: 3)
-        delay_reintento: Segundos base de espera entre reintentos (default: 2)
-        
-    Returns:
-        Tupla (ParentCI obtenido o None, Mensaje descriptivo)
-        Ej: ("Empresas – SDWAN_901999048-9", "ParentCI encontrado: Empresas – SDWAN_901999048-9")
-    """
+    """Consulta ITSM para obtener el ParentCI usando el ChildCI (End2)."""
     if config is None:
         from .config import itsm_config
         config = itsm_config
     
     if not end2_id or not end2_id.strip():
-        logger.error("End2 ID vacío recibido en consultar_parent_ci_en_itsm")
         return None, "End2 ID vacío"
     
     headers = _crear_headers_itsm(config)
     
-    # Construir URL de consulta (con URL encoding para caracteres especiales)
     end2_id_encoded = quote(str(end2_id), safe='')
     query = f'ChildCIs="{end2_id_encoded}"'
     url = f"{config.BASE_URL}/Relationships?query={query}&view=expand"
     
     for intento in range(1, max_reintentos + 1):
         try:
-            logger.debug(f"[Intento {intento}] GET Relationship: {url}")
             response = requests.get(
                 url,
                 headers=headers,
@@ -89,102 +50,57 @@ def consultar_parent_ci_en_itsm(
             
             if response.status_code == 200:
                 data = response.json()
-                
-                # Validar estructura de respuesta
-                if not isinstance(data, dict):
-                    logger.error("Respuesta inválida de ITSM: tipo no es dict")
-                    return None, "Respuesta inválida del servidor ITSM"
-                
                 content = data.get("content", [])
+                
                 if not content or not isinstance(content, list):
-                    logger.warning(f"No se encontraron relaciones para End2: {end2_id}")
                     return None, f"No encontrada relación con ChildCI={end2_id}"
                 
-                # Extraer ParentCI del primer elemento
                 try:
                     parent_ci = content[0].get("Relationship", {}).get("ParentCI")
                     if not parent_ci:
-                        logger.error(f"ParentCI no encontrado en respuesta para End2: {end2_id}")
-                        return None, "ParentCI no disponible en la respuesta"
+                        return None, "ParentCI no disponible en respuesta"
                     
-                    logger.debug(f"ParentCI obtenido: {parent_ci}")
-                    return parent_ci, f"ParentCI encontrado: {parent_ci}"
+                    return parent_ci, f"ParentCI: {parent_ci}"
                 
                 except (KeyError, IndexError, TypeError) as e:
-                    logger.error(f"Error extrayendo ParentCI: {e}")
-                    return None, f"Error en estructura de datos: {str(e)}"
+                    return None, f"Error extrayendo ParentCI: {e}"
             
             elif response.status_code == 404:
-                logger.warning(f"Relación no encontrada en ITSM para End2: {end2_id}")
-                return None, "Relación no encontrada en ITSM (HTTP 404)"
+                return None, "Relación no encontrada (HTTP 404)"
             
             elif response.status_code in [500, 502, 503, 504]:
                 if intento < max_reintentos:
                     espera = delay_reintento * (2 ** (intento - 1))
-                    logger.warning(f"Error servidor ITSM ({response.status_code}), reintentando en {espera}s (intento {intento}/{max_reintentos})")
+                    logger.warning(f"Error ITSM {response.status_code}, reintento en {espera}s")
                     time.sleep(espera)
                     continue
-                return None, f"Error servidor ITSM después de {max_reintentos} intentos ({response.status_code})"
+                return None, f"Error servidor después de {max_reintentos} intentos"
             
             else:
-                logger.error(f"Error HTTP {response.status_code} en GET Relationship: {response.text[:500]}")
-                return None, f"Error HTTP {response.status_code} en GET Relationship"
+                return None, f"Error HTTP {response.status_code}"
         
         except requests.exceptions.Timeout:
-            logger.warning(f"Timeout en GET Relationship ITSM (intento {intento}/{max_reintentos})")
             if intento < max_reintentos:
                 espera = delay_reintento * (2 ** (intento - 1))
-                logger.warning(f"Esperando {espera}s antes de reintentar...")
                 time.sleep(espera)
             if intento == max_reintentos:
-                return None, "Timeout en GET Relationship agotado"
-            continue
+                return None, "Timeout agotado"
         
         except requests.exceptions.ConnectionError as e:
-            logger.warning(f"Error conexión ITSM (intento {intento}/{max_reintentos}): {e}")
             if intento < max_reintentos:
                 espera = delay_reintento * (2 ** (intento - 1))
-                logger.warning(f"Esperando {espera}s antes de reintentar...")
                 time.sleep(espera)
             if intento == max_reintentos:
-                return None, f"Error de conexión ITSM: {str(e)}"
-            continue
+                return None, f"Error de conexión: {e}"
         
         except Exception as e:
-            logger.error(f"Error inesperado en GET Relationship: {e}")
-            return None, f"Error al consultar Relationship: {str(e)}"
+            return None, f"Error: {e}"
     
-    return None, "Error desconocido en consulta de Relationship"
+    return None, "Error desconocido"
 
 
 def _crear_headers_itsm(config: Optional[ITSMConfig] = None) -> Dict[str, str]:
-    """
-    Crea headers de autenticación Basic Auth para ITSM.
-    
-    Algoritmo:
-    1. Obtiene config de ITSM (parámetro o config global)
-    2. Concatena USERNAME:PASSWORD
-    3. Codifica Base64: base64(username:password)
-    4. Crea header Authorization: "Basic <encoded>"
-    5. Retorna dict con Authorization y Content-Type: application/json
-    
-    Seguridad:
-    - Las credenciales no se escriben en logs
-    - Usa encoding/decoding estándar IETF RFC 7617 Basic Auth
-    - VERIFY_SSL debe estar habilitado en producción
-    
-    Args:
-        config: Configuración de ITSM (si None, usa itsm_config global)
-    
-    Returns:
-        Dict con headers incluyendo:
-        - Authorization: "Basic <base64(username:password)>"
-        - Content-Type: "application/json"
-        
-    Ejemplo:
-        >>> headers = _crear_headers_itsm()
-        >>> headers["Authorization"]  # "Basic dXNlcjpwYXNz"
-    """
+    """Crea headers con autenticación Basic Auth para ITSM."""
     if config is None:
         from .config import itsm_config
         config = itsm_config
@@ -205,32 +121,16 @@ def ejecutar_update_itsm(
     max_reintentos: int = 3,
     delay_reintento: int = 2
 ) -> Tuple[bool, str]:
-    """
-    Ejecuta PUT en ITSM con reintentos automáticos para marcar relaciones como 'Removed'.
-    
-    Args:
-        url: URL completa del endpoint PUT en ITSM
-        config: Configuración de ITSM
-        max_reintentos: Máximo número de reintentos
-        delay_reintento: Segundos de espera entre reintentos
-        
-    Returns:
-        Tupla (Éxito, Mensaje descriptivo)
-    """
+    """Ejecuta PUT en ITSM para marcar relaciones como 'Removed'."""
     if config is None:
         from .config import itsm_config
         config = itsm_config
     
     if not url or not url.strip():
-        logger.error("URL vacía recibida en ejecutar_update_itsm")
         return False, "URL vacía"
     
     headers = _crear_headers_itsm(config)
-    payload = {
-        "cirelationship1to1": {
-            "status": "Removed"
-        }
-    }
+    payload = {"cirelationship1to1": {"status": "Removed"}}
     
     for intento in range(1, max_reintentos + 1):
         try:
@@ -243,50 +143,39 @@ def ejecutar_update_itsm(
             )
             
             if response.status_code in [200, 204]:
-                logger.debug(f"PUT exitoso en ITSM: {response.status_code}")
-                return True, f"Actualización exitosa en ITSM (HTTP {response.status_code})"
+                return True, f"Actualizado (HTTP {response.status_code})"
             
             elif response.status_code == 404:
-                logger.warning(f"Relación no encontrada en ITSM: {url}")
-                return False, "Relación no encontrada en ITSM (HTTP 404)"
+                return False, "Relación no encontrada (HTTP 404)"
             
             elif response.status_code in [500, 502, 503, 504]:
                 if intento < max_reintentos:
-                    espera = delay_reintento * (2 ** (intento - 1))  # Backoff exponencial
-                    logger.warning(f"Error servidor ITSM ({response.status_code}), reintentando en {espera}s (intento {intento}/{max_reintentos})")
+                    espera = delay_reintento * (2 ** (intento - 1))
                     time.sleep(espera)
                     continue
-                return False, f"Error servidor ITSM después de {max_reintentos} intentos ({response.status_code})"
+                return False, f"Error servidor después de {max_reintentos} intentos"
             
             else:
-                logger.error(f"Error HTTP {response.status_code} en ITSM: {response.text[:500]}")
-                return False, f"Error HTTP {response.status_code} en ITSM"
+                return False, f"Error HTTP {response.status_code}"
         
         except requests.exceptions.Timeout:
-            logger.warning(f"Timeout en PUT ITSM (intento {intento}/{max_reintentos})")
             if intento < max_reintentos:
                 espera = delay_reintento * (2 ** (intento - 1))
-                logger.warning(f"Esperando {espera}s antes de reintentar...")
                 time.sleep(espera)
             if intento == max_reintentos:
-                return False, "Timeout en ITSM agotado"
-            continue
+                return False, "Timeout en ITSM"
         
         except requests.exceptions.ConnectionError as e:
-            logger.warning(f"Error conexión ITSM (intento {intento}/{max_reintentos}): {e}")
             if intento < max_reintentos:
                 espera = delay_reintento * (2 ** (intento - 1))
-                logger.warning(f"Esperando {espera}s antes de reintentar...")
                 time.sleep(espera)
             if intento == max_reintentos:
-                return False, f"Error de conexión ITSM: {str(e)}"
-            continue
+                return False, f"Error de conexión: {e}"
         
         except Exception as e:
-            logger.error(f"Error inesperado en PUT ITSM: {e}")
-            return False, f"Error ITSM: {str(e)}"
+            return False, f"Error: {e}"
     
-    return False, "Error desconocido en ITSM"
+    return False, "Error desconocido"
 
 
 def eliminar_en_itsm(
@@ -297,70 +186,44 @@ def eliminar_en_itsm(
     generar_resumen: bool = True,
     cis_by_id: Optional[Dict[str, Any]] = None
 ) -> None:
-    """
-    Procesa actualizaciones en ITSM SOLO para relaciones con relacion_fo: true.
-    
-    Proceso en dos pasos:
-    1. GET /SM/9/rest/Relationships?query=ChildCIs="<end2Id>"&view=expand → obtener ParentCI
-    2. PUT /SM/9/rest/cirelationship1to1s/{ParentCI}/{end2Id} → marcar como Removed
-    
-    Body: {"cirelationship1to1": {"status": "Removed"}}
-    
-    Args:
-        inconsistencias_normales_con_fo: Lista de relaciones con fo:true
-        carpeta: Ruta para guardar resumen
-        config: Configuración de ITSM
-        modo_ejecucion: "simulacion" o "ejecucion"
-        generar_resumen: True para generar archivo de resumen
-        cis_by_id: Diccionario de CIs por ucmdbId para obtener display_label
-    """
+    """Procesa actualizaciones en ITSM para relaciones con relacion_fo=true."""
     if config is None:
         from .config import itsm_config
         config = itsm_config
     
     logger.info("=" * 80)
-    logger.info("PASO 6B: ACTUALIZAR EN ITSM (Sistema de Gestión de Servicios TI)")
+    logger.info("PASO 6C: ACTUALIZAR EN ITSM")
     logger.info("=" * 80)
     
     if not config.BASE_URL:
-        logger.error("ERROR CRÍTICO: ITSM_URL no está configurada en .env")
-        logger.error("  Requerida: ITSM_URL (ej: https://servidor:puerto/SM/9/rest)")
-        return None
+        logger.error("ITSM_URL no configurada en .env")
+        return
     
-    logger.info(f"ITSM_URL configurada: {config.BASE_URL}")
+    logger.info(f"ITSM_URL: {config.BASE_URL}")
+    logger.info(f"Modo: {'EJECUCIÓN' if modo_ejecucion == 'ejecucion' else 'SIMULACIÓN'}")
     
-    if modo_ejecucion == "ejecucion":
-        logger.warning("[EJECUCIÓN] Se consultarán y marcarán relaciones como 'Removed' en ITSM")
-    else:
-        logger.info("[SIMULACIÓN] Se mostrarán URLs sin ejecutar")
-    
-    # GARANTÍA: Filtrar solo aquellas que TIENEN end2Id válido
     relaciones_validas = [
         item for item in inconsistencias_normales_con_fo 
         if item.get("end2Id") and item.get("end2Id") != "N/A"
     ]
     
     total = len(relaciones_validas)
-    logger.info(f"Total relaciones para procesar: {total}")
-    logger.info("-" * 80)
+    logger.info(f"Total relaciones: {total}")
     
     if not relaciones_validas:
-        logger.info("No hay inconsistencias para procesar")
+        logger.info("No hay relaciones para procesar")
         return None
     
-    resumen = []
+    resumen: List[Dict[str, Any]] = []
     exitosas = 0
     fallidas = 0
     
-    # Función helper para obtener display_label de un CI desde cis_by_id
     def obtener_display_label(ucmdb_id: str) -> str:
         if cis_by_id and ucmdb_id in cis_by_id:
             ci = cis_by_id[ucmdb_id]
-            # Primero buscar en properties.display_label
             props = ci.get("properties", {})
             if props.get("display_label"):
                 return props.get("display_label")
-            # Luego buscar en el campo label del CI
             if ci.get("label"):
                 return ci.get("label")
         return "N/A"
@@ -368,28 +231,21 @@ def eliminar_en_itsm(
     for idx, item in enumerate(relaciones_validas, 1):
         end2id = item.get("end2Id", "").strip()
         ucmdbid = item.get("ucmdbId", "").strip()
-        nit_end1 = item.get("nit_end1", "N/A")
-        nit_end2 = item.get("nit_end2", "N/A")
-        end1id = item.get("end1Id", "N/A")
-        label_end1 = item.get("display_label_end1", "N/A")
-        label_end2 = item.get("display_label_end2", "N/A")
         
         if not end2id:
-            logger.warning(f"[{idx}/{total}] End2 ID vacío, saltando")
             continue
         
-        # Mostrar resumen en formato legible
-        logger.info(f"[{idx}/{total}] Procesando relación: {ucmdbid}")
-        logger.info(f"  NIT: {nit_end1} ≠ {nit_end2}")
-        logger.info(f"  End1: {label_end1} ({end1id})")
-        logger.info(f"  End2: {label_end2} ({end2id})")
+        logger.info(f"[{idx}/{total}] Procesando: {ucmdbid}")
+        logger.info(f"  NIT: {item.get('nit_end1', 'N/A')} ≠ {item.get('nit_end2', 'N/A')}")
+        logger.info(f"  End1: {item.get('display_label_end1', 'N/A')}")
+        logger.info(f"  End2: {item.get('display_label_end2', 'N/A')}")
         
-        resultado = {
+        resultado: Dict[str, Any] = {
             "numero": idx,
             "ucmdbId": ucmdbid,
             "end2Id": end2id,
-            "display_label_end1": label_end1,
-            "display_label_end2": label_end2,
+            "display_label_end1": item.get("display_label_end1", "N/A"),
+            "display_label_end2": item.get("display_label_end2", "N/A"),
             "display_label_end2_obtenido": obtener_display_label(end2id),
             "parentCI": None,
             "url_query": f"{config.BASE_URL}/Relationships?query=ChildCIs=\"{quote(str(end2id), safe='')}\"&view=expand",
@@ -400,23 +256,20 @@ def eliminar_en_itsm(
             "detalles": ""
         }
         
-        # PASO 1: Consultar ParentCI usando GET (en AMBOS modos)
         logger.info("  → Paso 1: GET Relationship para obtener ParentCI...")
         parent_ci, msg_consulta = consultar_parent_ci_en_itsm(end2id, config)
         
         if not parent_ci:
             resultado["estado"] = "FALLIDA"
-            resultado["detalles"] = f"GET Relationship falló: {msg_consulta}"
+            resultado["detalles"] = f"GET falló: {msg_consulta}"
             fallidas += 1
-            logger.error(f"  ✗ Consulta GET falló: {msg_consulta}")
+            logger.error(f"  ✗ GET falló: {msg_consulta}")
             resumen.append(resultado)
             continue
         
         resultado["parentCI"] = parent_ci
-        logger.info(f"  ✓ ParentCI obtenido: {parent_ci}")
+        logger.info(f"  ✓ ParentCI: {parent_ci}")
         
-        # PASO 2: Construir URL de eliminación con ParentCI (con URL encoding)
-        # ParentCI puede tener espacios y caracteres especiales, necesita encoding
         parent_ci_encoded = quote(str(parent_ci), safe='')
         end2id_encoded = quote(str(end2id), safe='')
         delete_url = f"{config.BASE_URL}/cirelationship1to1s/{parent_ci_encoded}/{end2id_encoded}"
@@ -435,36 +288,25 @@ def eliminar_en_itsm(
                 fallidas += 1
                 logger.error(f"  ✗ PUT falló: {msg_delete}")
         else:
-            # SIMULACIÓN: Mostrar URLs que se ejecutarían
             resultado["estado"] = "SIMULADA"
             logger.info(f"  [SIM] PUT {delete_url}")
         
         resumen.append(resultado)
     
-    logger.info("-" * 80)
-    logger.info("Resumen ITSM:")
-    logger.info(f"  Total procesadas: {total}")
-    logger.info(f"  Exitosas: {exitosas}")
-    logger.info(f"  Fallidas: {fallidas}")
-    if modo_ejecucion != "ejecucion":
-        logger.info(f"  Simuladas: {total}")
+    logger.info(f"Total procesadas: {total}, Exitosas: {exitosas}, Fallidas: {fallidas}")
     
     if generar_resumen:
         _guardar_resumen_itsm(resumen, carpeta)
 
 
-def _guardar_resumen_itsm(
-    resumen: List[Dict[str, Any]],
-    carpeta: Any
-) -> Optional[Any]:
-    """Guarda resumen de operaciones ITSM con detalles de consulta y eliminación."""
+def _guardar_resumen_itsm(resumen: List[Dict[str, Any]], carpeta: Any) -> Optional[Path]:
+    """Guarda resumen de operaciones ITSM."""
     from pathlib import Path
     
     if not isinstance(carpeta, Path):
         carpeta = Path(carpeta)
     
     if carpeta.name == "disabled":
-        logger.info("Guardado de resumen ITSM deshabilitado")
         return None
     
     archivo = carpeta / "resumen_itsm.txt"
@@ -479,31 +321,20 @@ def _guardar_resumen_itsm(
             for item in resumen:
                 f.write(f"[{item['numero']}] Relación: {item['ucmdbId']}\n")
                 f.write(f"  End2 ID: {item['end2Id']}\n")
-                f.write(f"  Display Label End2 (desde CIs): {item.get('display_label_end2_obtenido', 'N/A')}\n")
-                f.write(f"  Display Label End1: {item.get('display_label_end1', 'N/A')}\n")
                 f.write(f"  Display Label End2: {item.get('display_label_end2', 'N/A')}\n")
-                
                 if item['parentCI']:
-                    f.write(f"  ParentCI obtenido: {item['parentCI']}\n")
-                
-                f.write("\n  PASO 1 (GET Relationship):\n")
-                f.write(f"    URL: {item['url_query']}\n")
-                
+                    f.write(f"  ParentCI: {item['parentCI']}\n")
+                f.write(f"  GET URL: {item['url_query']}\n")
                 if item['url_delete']:
-                    f.write("\n  PASO 2 (PUT cirelationship1to1s):\n")
-                    f.write(f"    URL: {item['url_delete']}\n")
-                
-                f.write(f"\n  Metodo: {item['metodo']}\n")
+                    f.write(f"  PUT URL: {item['url_delete']}\n")
                 f.write(f"  Modo: {item['modo']}\n")
                 f.write(f"  Estado: {item['estado']}\n")
-                
                 if item['detalles']:
                     f.write(f"  Detalle: {item['detalles']}\n")
-                
                 f.write("\n" + "-" * 80 + "\n\n")
         
         logger.info(f"Resumen ITSM guardado: {archivo}")
         return archivo
     except IOError as e:
-        logger.error(f"Error guardando resumen ITSM: {e}")
+        logger.error(f"Error guardando resumen: {e}")
         return None

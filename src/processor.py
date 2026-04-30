@@ -1,7 +1,5 @@
 """
-Módulo de Procesamiento de Datos.
-
-Gestiona el enriquecimiento y procesamiento de datos de inconsistencias.
+Procesamiento de datos y generación de reportes.
 """
 
 from typing import List, Dict, Any, Optional
@@ -13,39 +11,20 @@ from .logger_config import obtener_logger
 
 logger = obtener_logger(__name__)
 
-# Tipos de CI que se consideran "Foreign Object" válidos
-TIPOS_FO_VALIDOS = [
+TIPOS_FO_VALIDOS: List[str] = [
     "clr_service_catalog_fo_e",
     "clr_service_catalog_fo_n",
     "clr_service_catalog_fo_p",
     "clr_service_catalog_fo_cloud"
 ]
 
-# Configuración de output
 SEPARADOR_REPORTE = "=" * 80
 INDENT_JSON = 2
 
 
-def guardar_reporte_json(
-    json_data: Dict[str, Any],
-    carpeta: Path
-) -> Optional[Path]:
-    """
-    Guarda el JSON completo del reporte.
-    
-    Args:
-        json_data: Datos JSON a guardar (esperado con claves 'cis' y 'relations')
-        carpeta: Carpeta donde guardar (si es 'disabled', omite guardado)
-    
-    Returns:
-        Ruta del archivo guardado o None si está deshabilitado o error
-        
-    Ejemplo:
-        >>> ruta = guardar_reporte_json({"cis": [...], "relations": [...]}, Path("reports"))
-        >>> print(ruta)  # reports/reporte_2026-02-19_08-30-00.json
-    """
+def guardar_reporte_json(json_data: Dict[str, Any], carpeta: Path) -> Optional[Path]:
+    """Guarda el JSON completo del reporte."""
     if carpeta.name == "disabled":
-        logger.debug("Guardado de reporte JSON deshabilitado")
         return None
     
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -57,7 +36,7 @@ def guardar_reporte_json(
         logger.info(f"Reporte JSON guardado: {archivo_reporte}")
         return archivo_reporte
     except (IOError, OSError) as e:
-        logger.error(f"Error al guardar reporte JSON en {archivo_reporte}: {e}")
+        logger.error(f"Error al guardar reporte JSON: {e}")
         return None
 
 
@@ -66,75 +45,45 @@ def guardar_inconsistencias_detalle(
     carpeta: Path,
     nombre_archivo: str
 ) -> Optional[Path]:
-    """
-    Guarda detalle de inconsistencias encontradas en formato texto.
-    
-    Genera un archivo con una inconsistencia por entrada, mostrando:
-    - IDs de relación, end1 y end2
-    - Nombres de CIs (display labels)
-    - NITs de ambos extremos
-    - Estado FO (Foreign Object) si aplica
-    
-    Args:
-        inconsistencias: Lista de inconsistencias con estructura {ucmdbId, end1Id, end2Id, ...}
-        carpeta: Carpeta destino (si es 'disabled', omite guardado)
-        nombre_archivo: Nombre del archivo output (ej: 'inconsistencias.txt')
-    
-    Returns:
-        Ruta del archivo guardado o None si está vacío/deshabilitado
-    """
+    """Guarda detalle de inconsistencias encontradas."""
     if not inconsistencias:
-        logger.debug(f"Sin inconsistencias para guardar en {nombre_archivo}")
         return None
-
+    
     if carpeta.name == "disabled":
-        logger.debug(f"Guardado de {nombre_archivo} deshabilitado")
         return None
-
+    
     archivo = carpeta / nombre_archivo
-
+    
     try:
         with open(archivo, "w", encoding="utf-8") as f:
             titulo = nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')
             f.write(SEPARADOR_REPORTE + "\n")
             f.write(titulo.center(80) + "\n")
             f.write(SEPARADOR_REPORTE + "\n\n")
-            f.write(f"Fecha de generacion: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Total de registros: {len(inconsistencias)}\n")
+            f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total: {len(inconsistencias)}\n")
             f.write(SEPARADOR_REPORTE + "\n\n")
             
             for idx, item in enumerate(inconsistencias, 1):
-                # Extraer campos con valores por defecto
-                relation_id = item.get("ucmdbId", "N/A")
-                end1_id = item.get("end1Id", "N/A")
-                end2_id = item.get("end2Id", "N/A")
-                end1_label = item.get("display_label_end1", "N/A")
-                end2_label = item.get("display_label_end2", "N/A")
-                nit_end1 = item.get("nit_end1", "N/A")
-                nit_end2 = item.get("nit_end2", "N/A")
-                relacion_fo = item.get("relacion_fo", "N/A")
-                id_fo = item.get("ucmdbid_fo", "N/A")
-                
                 f.write(f"[{idx:04d}] RELACION\n")
                 f.write("-" * 80 + "\n")
-                f.write(f"  ID Relacion:           {relation_id}\n")
-                f.write(f"\n  EXTREMO 1 (END1):\n")
-                f.write(f"    ID:                  {end1_id}\n")
-                f.write(f"    Nombre:              {end1_label}\n")
-                f.write(f"    NIT:                 {nit_end1}\n")
-                f.write(f"\n  EXTREMO 2 (END2):\n")
-                f.write(f"    ID:                  {end2_id}\n")
-                f.write(f"    Nombre:              {end2_label}\n")
-                f.write(f"    NIT:                 {nit_end2}\n")
-                f.write(f"\n  INFORMACION ADICIONAL:\n")
-                f.write(f"    Contiene FO:         {relacion_fo}\n")
-                f.write(f"    ID FO (si aplica):   {id_fo}\n")
+                f.write(f"  ID Relacion:           {item.get('ucmdbId', 'N/A')}\n")
+                f.write(f"  EXTREMO 1 (END1):\n")
+                f.write(f"    ID:                  {item.get('end1Id', 'N/A')}\n")
+                f.write(f"    Nombre:              {item.get('display_label_end1', 'N/A')}\n")
+                f.write(f"    NIT:                 {item.get('nit_end1', 'N/A')}\n")
+                f.write(f"  EXTREMO 2 (END2):\n")
+                f.write(f"    ID:                  {item.get('end2Id', 'N/A')}\n")
+                f.write(f"    Nombre:              {item.get('display_label_end2', 'N/A')}\n")
+                f.write(f"    NIT:                 {item.get('nit_end2', 'N/A')}\n")
+                f.write(f"  Contiene FO:           {item.get('relacion_fo', 'N/A')}\n")
+                f.write(f"  ID FO:                {item.get('ucmdbid_fo', 'N/A')}\n")
                 f.write("\n")
-
+        
         logger.info(f"Guardadas {len(inconsistencias)} inconsistencias en: {archivo}")
         return archivo
     except (IOError, OSError) as e:
-        logger.error(f"Error guardando {nombre_archivo} en {archivo}: {e}")
+        logger.error(f"Error guardando {nombre_archivo}: {e}")
         return None
 
 
@@ -144,58 +93,27 @@ def enriquecer_inconsistencias_normales(
     containment_by_end2: Dict[str, Dict[str, Any]],
     cis_by_id: Dict[str, Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
-    """
-    Enriquece inconsistencias normales identificando relaciones "Foreign Object" (FO).
-    
-    Algoritmo:
-    Para cada inconsistencia:
-    1. Obtiene el end2Id de la relación original
-    2. Busca si existe una relación CONTAINMENT con ese end2Id
-    3. Verifica si el CI[end1Id] de containment es de tipo FO válido
-    4. Si es FO: marca relacion_fo=True y guarda ucmdbId_fo para rastreo
-    
-    Tipos FO válidos: {', '.join(TIPOS_FO_VALIDOS)}
-    
-    Args:
-        inconsistencias: Lista de inconsistencias normales (NIT end1 ≠ NIT end2)
-        relations: Lista de todas las relaciones, indexadas por ucmdbId
-        containment_by_end2: Dict pre-indexado {end2Id -> relación_containment}
-        cis_by_id: Dict pre-indexado {ucmdbId -> CI_node}
-    
-    Returns:
-        Lista enriquecida con campos 'relacion_fo' (bool) y 'ucmdbid_fo' (str)
-        
-    Nota:
-        Si la relación original no se encuentra, la inconsistencia se devuelve sin enriquecer
-    """
-    # Pre-indexar relaciones por ucmdbId para búsqueda O(1)
+    """Enriquece inconsistencias identificando relaciones Foreign Object (FO)."""
     relations_by_id = {rel.get("ucmdbId"): rel for rel in relations if rel.get("ucmdbId")}
-    logger.debug(f"Indexadas {len(relations_by_id)} relaciones para enriquecimiento")
     
-    relaciones_enriquecidas = []
+    relaciones_enriquecidas: List[Dict[str, Any]] = []
     relaciones_fo_encontradas = 0
-    relaciones_sin_enriquecer = 0
     
     for item in inconsistencias:
         ucmdbid = item.get("ucmdbId")
         
-        # Obtener la relación original para extraer end2Id
         rel_original = relations_by_id.get(ucmdbid)
         if not rel_original:
-            logger.warning(f"Relación original no indexada: {ucmdbid}")
-            relaciones_sin_enriquecer += 1
             relaciones_enriquecidas.append(item)
             continue
         
         end2id = rel_original.get("end2Id")
         
-        # Buscar relación FO (CONTAINMENT)
         relacion_fo = False
         ucmdbid_fo = "N/A"
         
         containment_rel = containment_by_end2.get(end2id)
         if containment_rel:
-            # Verificar si el CI en end1Id de containment es tipo FO válido
             sc_end1id = containment_rel.get("end1Id")
             ci_node = cis_by_id.get(sc_end1id)
             
@@ -204,47 +122,22 @@ def enriquecer_inconsistencias_normales(
                 ucmdbid_fo = containment_rel.get("ucmdbId", "N/A")
                 relaciones_fo_encontradas += 1
         
-        # Agregar información enriquecida
         item_enriquecido = item.copy()
         item_enriquecido["relacion_fo"] = relacion_fo
         item_enriquecido["ucmdbid_fo"] = ucmdbid_fo
         
         relaciones_enriquecidas.append(item_enriquecido)
     
-    logger.debug(f"Enriquecidas {len(relaciones_enriquecidas)} inconsistencias normales"
-                f" ({relaciones_fo_encontradas} FO encontradas)")
-    if relaciones_sin_enriquecer > 0:
-        logger.warning(f"No se pudieron enriquecer {relaciones_sin_enriquecer} relaciones")
-    
+    logger.debug(f"Enriquecidas {len(relaciones_enriquecidas)} ({relaciones_fo_encontradas} FO)")
     return relaciones_enriquecidas
 
 
 def crear_directorio_ejecucion(crear_carpeta: bool = True) -> Path:
-    """
-    Crea directorio de ejecución con timestamp o retorna path 'disabled'.
-    
-    Cuando crear_carpeta=True:
-    - Crea directorio: reports/ejecucion_YYYY-MM-DD_HH-MM-SS/
-    - Retorna Path al directorio creado
-    
-    Cuando crear_carpeta=False:
-    - Retorna Path a 'reports/disabled' (sin crear)
-    - Útil para deshabilitar guardado de archivos
-    
-    Args:
-        crear_carpeta: Si True, crea carpeta con timestamp; si False, retorna 'disabled'
-    
-    Returns:
-        Path del directorio nuevo o Path a 'disabled'
-        
-    Ejemplo:
-        >>> carpeta = crear_directorio_ejecucion(True)
-        >>> print(carpeta)  # reports/ejecucion_2026-02-19_08-30-00
-    """
+    """Crea directorio de ejecución con timestamp."""
     reports_dir = Path("reports").resolve()
     
     if not crear_carpeta:
-        logger.info("Creación de carpeta de ejecución deshabilitada")
+        logger.info("Creación de carpeta deshabilitada")
         return reports_dir / "disabled"
     
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -252,134 +145,39 @@ def crear_directorio_ejecucion(crear_carpeta: bool = True) -> Path:
     
     try:
         carpeta_ejecucion.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Directorio de ejecución creado: {carpeta_ejecucion}")
+        logger.info(f"Directorio creado: {carpeta_ejecucion}")
         return carpeta_ejecucion
     except OSError as e:
-        logger.error(f"Error creando carpeta {carpeta_ejecucion}: {e}")
-        # Fallback: retornar disabled
+        logger.error(f"Error creando carpeta: {e}")
         return reports_dir / "disabled"
 
 
 def validar_integridad_json(json_data: Dict[str, Any]) -> bool:
-    """
-    Valida la integridad y estructura del JSON descargado de UCMDB.
-    
-    Algoritmo de validación en cascada:
-    1. Verifica que JSON raíz sea diccionario
-    2. Verifica existencia de claves principales ('cis', 'relations')
-    3. Verifica que ambas sean listas no vacías
-    4. Verifica estructura de elementos individuales (ucmdbId, end1Id, end2Id)
-    5. Verifica completitud del último elemento (detección de truncado)
-    
-    Verifica:
-    ✓ JSON raíz es diccionario
-    ✓ Claves 'cis' y 'relations' existen y son listas
-    ✓ Ambas listas tienen al menos 1 elemento
-    ✓ Elementos mínimos tienen estructura esperada (ucmdbId, type, etc.)
-    ✓ Último elemento no está truncado
-    
-    Args:
-        json_data: Diccionario JSON a validar desde UCMDB
-    
-    Returns:
-        True si JSON es válido y completo, False si hay errores
-        
-    Ejemplo:
-        >>> datos = {"cis": [{"ucmdbId": "ci1"}], "relations": [{"ucmdbId": "rel1"}]}
-        >>> es_valido = validar_integridad_json(datos)  # True
-    """
+    """Valida la estructura del JSON descargado de UCMDB."""
     logger.info("=" * 60)
-    logger.info("Iniciando validación de integridad JSON...")
+    logger.info("Validando integridad JSON...")
     logger.info("=" * 60)
     
-    # Validar tipo raíz
     if not isinstance(json_data, dict):
-        logger.error(f"❌ JSON raíz debe ser diccionario, obtenido: {type(json_data).__name__}")
+        logger.error(f"JSON raíz debe ser diccionario, obtenido: {type(json_data).__name__}")
         return False
     
-    logger.debug("✓ JSON raíz es diccionario")
-    
-    # Validar claves principales
     cis = json_data.get("cis")
     relations = json_data.get("relations")
     
-    if cis is None:
-        logger.error("❌ Campo 'cis' no encontrado en JSON")
+    if cis is None or relations is None:
+        logger.error("Campos 'cis' o 'relations' no encontrados")
         return False
     
-    logger.debug("✓ Campo 'cis' encontrado")
-    
-    if relations is None:
-        logger.error("❌ Campo 'relations' no encontrado en JSON")
+    if not isinstance(cis, list) or not isinstance(relations, list):
+        logger.error("'cis' y 'relations' deben ser listas")
         return False
     
-    logger.debug("✓ Campo 'relations' encontrado")
-    
-    # Validar que sean listas
-    if not isinstance(cis, list):
-        logger.error(f"❌ Campo 'cis' debe ser lista, obtenido: {type(cis).__name__}")
+    if not cis or not relations:
+        logger.error("Listas vacías")
         return False
     
-    if not isinstance(relations, list):
-        logger.error(f"❌ Campo 'relations' debe ser lista, obtenido: {type(relations).__name__}")
-        return False
-    
-    logger.debug("✓ Tanto 'cis' como 'relations' son listas")
-    
-    # Validar que no estén vacías
-    if len(cis) == 0:
-        logger.error("❌ No hay CIs en el JSON (lista vacía)")
-        return False
-    
-    if len(relations) == 0:
-        logger.error("❌ No hay relaciones en el JSON (lista vacía)")
-        return False
-    
-    logger.debug(f"✓ Listas no vacías: {len(cis)} CIs, {len(relations)} relaciones")
-    
-    # Validar estructura de elementos principales
-    try:
-        # Verificar estructura de primer CI
-        primer_ci = cis[0]
-        if not isinstance(primer_ci, dict):
-            logger.warning(f"⚠ Primer CI no es diccionario: {type(primer_ci).__name__}")
-        elif "ucmdbId" not in primer_ci:
-            logger.warning("⚠ Primer CI no tiene campo 'ucmdbId'")
-        else:
-            logger.debug(f"✓ Primer CI válido: {primer_ci.get('ucmdbId', 'N/A')}")
-        
-        # Verificar estructura de primera relación
-        primera_rel = relations[0]
-        if not isinstance(primera_rel, dict):
-            logger.warning(f"⚠ Primera relación no es diccionario: {type(primera_rel).__name__}")
-        elif "ucmdbId" not in primera_rel:
-            logger.warning("⚠ Primera relación no tiene campo 'ucmdbId'")
-        else:
-            logger.debug(f"✓ Primera relación válida: {primera_rel.get('ucmdbId', 'N/A')}")
-        
-        # Verificar que el último elemento de relaciones está completo
-        ultima_rel = relations[-1]
-        if not isinstance(ultima_rel, dict):
-            logger.error(f"❌ Última relación no es diccionario: {type(ultima_rel).__name__}")
-            return False
-        
-        if "ucmdbId" not in ultima_rel:
-            logger.error("❌ Última relación no tiene campo 'ucmdbId' (posiblemente truncada)")
-            return False
-        
-        if "end1Id" not in ultima_rel or "end2Id" not in ultima_rel:
-            logger.error("❌ Última relación está faltando campos clave (end1Id, end2Id)")
-            return False
-        
-        logger.debug(f"✓ Última relación completa: {ultima_rel.get('ucmdbId', 'N/A')}")
-        
-    except (IndexError, KeyError, TypeError) as e:
-        logger.error(f"❌ Error validando estructura: {type(e).__name__}: {e}")
-        return False
-    
-    logger.info("=" * 60)
-    logger.info(f"✅ Validación exitosa: {len(cis):,} CIs, {len(relations):,} relaciones")
-    logger.info("=" * 60)
+    logger.info(f"Validación exitosa: {len(cis):,} CIs, {len(relations):,} relaciones")
     return True
 
 
@@ -388,68 +186,42 @@ def guardar_relaciones_usage_detalle(
     carpeta: Path,
     nombre_archivo: str = "relaciones_usage_de_servicecodes.txt"
 ) -> Optional[Path]:
-    """
-    Guarda detalle de relaciones usage de servicecodes a eliminar en formato texto.
-    
-    Genera un archivo con una relacion por entrada, mostrando:
-    - ID de relacion usage
-    - Datos de la aplicacion (end1Id, tipo, etiqueta)
-    - Datos del servicecode (end2Id, tipo, etiqueta)
-    
-    Args:
-        relaciones_usage: Lista de relaciones usage a eliminar
-        carpeta: Carpeta destino (si es 'disabled', omite guardado)
-        nombre_archivo: Nombre del archivo output
-    
-    Returns:
-        Ruta del archivo guardado o None si esta vacia/deshabilitada
-    """
+    """Guarda detalle de relaciones usage."""
     if not relaciones_usage:
-        logger.debug(f"Sin relaciones usage para guardar en {nombre_archivo}")
         return None
-
+    
     if carpeta.name == "disabled":
-        logger.debug(f"Guardado de {nombre_archivo} deshabilitado")
         return None
-
+    
     archivo = carpeta / nombre_archivo
-
+    
     try:
         with open(archivo, "w", encoding="utf-8") as f:
             titulo = nombre_archivo.upper().replace('.TXT', '').replace('_', ' ')
             f.write(SEPARADOR_REPORTE + "\n")
             f.write(titulo.center(80) + "\n")
             f.write(SEPARADOR_REPORTE + "\n\n")
-            f.write(f"Fecha de generacion: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Total de registros: {len(relaciones_usage)}\n")
-            f.write(f"Tipo de relacion: usage (Aplicacion -> Servicecode)\n")
+            f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total: {len(relaciones_usage)}\n")
+            f.write(f"Tipo: usage (App -> Servicecode)\n")
             f.write(SEPARADOR_REPORTE + "\n\n")
             
             for idx, item in enumerate(relaciones_usage, 1):
-                relation_id = item.get("ucmdbId", "N/A")
-                end1_id = item.get("end1Id", "N/A")
-                end2_id = item.get("end2Id", "N/A")
-                end1_label = item.get("display_label_end1", "N/A")
-                end2_label = item.get("display_label_end2", "N/A")
-                end1_type = item.get("ci_type_end1", "N/A")
-                end2_type = item.get("ci_type_end2", "N/A")
-                rel_type = item.get("type", "N/A")
-                
-                f.write(f"[{idx:04d}] RELACION {rel_type.upper()}\n")
+                f.write(f"[{idx:04d}] RELACION {item.get('type', 'N/A').upper()}\n")
                 f.write("-" * 80 + "\n")
-                f.write(f"  ID Relacion:           {relation_id}\n")
-                f.write(f"\n  ORIGEN (END1 - APLICACION):\n")
-                f.write(f"    ID:                  {end1_id}\n")
-                f.write(f"    Nombre:              {end1_label}\n")
-                f.write(f"    Tipo:                {end1_type}\n")
-                f.write(f"\n  DESTINO (END2 - SERVICECODE):\n")
-                f.write(f"    ID:                  {end2_id}\n")
-                f.write(f"    Nombre:              {end2_label}\n")
-                f.write(f"    Tipo:                {end2_type}\n")
+                f.write(f"  ID Relacion:           {item.get('ucmdbId', 'N/A')}\n")
+                f.write(f"  ORIGEN (END1):\n")
+                f.write(f"    ID:                  {item.get('end1Id', 'N/A')}\n")
+                f.write(f"    Nombre:              {item.get('display_label_end1', 'N/A')}\n")
+                f.write(f"    Tipo:                {item.get('ci_type_end1', 'N/A')}\n")
+                f.write(f"  DESTINO (END2):\n")
+                f.write(f"    ID:                  {item.get('end2Id', 'N/A')}\n")
+                f.write(f"    Nombre:              {item.get('display_label_end2', 'N/A')}\n")
+                f.write(f"    Tipo:                {item.get('ci_type_end2', 'N/A')}\n")
                 f.write("\n")
-
+        
         logger.info(f"Guardadas {len(relaciones_usage)} relaciones usage en: {archivo}")
         return archivo
     except (IOError, OSError) as e:
-        logger.error(f"Error guardando {nombre_archivo} en {archivo}: {e}")
+        logger.error(f"Error guardando: {e}")
         return None

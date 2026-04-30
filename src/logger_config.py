@@ -1,8 +1,5 @@
 """
-Módulo de Configuración Centralizada de Logging.
-
-Proporciona funciones para configurar el sistema de logging
-de manera consistente en todo el proyecto.
+Configuración de logging del proyecto.
 """
 
 import logging
@@ -14,40 +11,30 @@ from .config import LoggingConfig
 
 
 class LoggerFactory:
-    """
-    Factory para crear loggers configurados profesionalmente.
+    """Factory para crear loggers configurados consistentemente."""
     
-    Asegura que todos los loggers del proyecto tengan una configuración
-    consistente.
-    """
-    
-    _configured = False
+    _configured: bool = False
     
     @staticmethod
-    def configurar_logging_global():
+    def configurar_logging_global() -> None:
         """Configura el sistema de logging global una sola vez."""
         if LoggerFactory._configured:
             return
         
-        # Obtener logger raíz
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.DEBUG)
         
-        # Crear carpeta de logs si no existe
         LoggingConfig.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         
-        # Formato
         formatter = logging.Formatter(
             LoggingConfig.LOG_FORMAT,
             datefmt=LoggingConfig.DATE_FORMAT
         )
         
-        # Handler para stdout (consola)
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(formatter)
         
-        # Handler para archivo (main log)
         file_handler = logging.handlers.RotatingFileHandler(
             LoggingConfig.LOG_FILE,
             maxBytes=10 * 1024 * 1024,  # 10 MB
@@ -57,7 +44,6 @@ class LoggerFactory:
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(formatter)
         
-        # Agregar handlers
         root_logger.addHandler(console_handler)
         root_logger.addHandler(file_handler)
         
@@ -65,28 +51,11 @@ class LoggerFactory:
     
     @staticmethod
     def obtener_logger(nombre: str) -> logging.Logger:
-        """
-        Obtiene un logger configurado para un módulo específico.
-        
-        Args:
-            nombre: Nombre del logger (típicamente __name__)
-            
-        Returns:
-            logging.Logger: Logger configurado y listo para usar
-        """
+        """Obtiene un logger configurado para un módulo específico."""
         LoggerFactory.configurar_logging_global()
         return logging.getLogger(nombre)
 
 
-# Función de conveniencia global
 def obtener_logger(nombre: str) -> logging.Logger:
-    """
-    Obtiene un logger configurado.
-    
-    Args:
-        nombre: Nombre del logger (típicamente __name__)
-        
-    Returns:
-        logging.Logger: Logger configurado
-    """
+    """Obtiene un logger configurado."""
     return LoggerFactory.obtener_logger(nombre)
